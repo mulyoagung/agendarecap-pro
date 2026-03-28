@@ -1,0 +1,112 @@
+/* Global overrides for react-day-picker v9 to match theme */
+
+.custom-calendar {
+  --rdp-cell-size: 40px; /* Size of the days */
+  --rdp-accent-color: #8b5cf6; /* Tailwind Purple 500 */
+  --rdp-background-color: rgba(255, 255, 255, 0.05); /* Hover/selection bg */
+  --rdp-outline: 2px solid var(--rdp-accent-color); /* Focus Outline */
+  --rdp-outline-offset: 2px;
+}
+
+/* Adjust sizes for larger screens if necessary */
+@media (min-width: 640px) {
+  .custom-calendar {
+    --rdp-cell-size: 44px; 
+  }
+}
+
+.custom-calendar .rdp-root {
+  width: 100%;
+}
+
+.custom-calendar .rdp-month_caption {
+  font-weight: bold;
+  font-size: 1.125rem;
+  color: white;
+  margin-bottom: 1rem;
+}
+
+.custom-calendar .rdp-nav {
+  position: absolute;
+  top: 1rem;
+  right: 1.5rem;
+  gap: 0.25rem;
+}
+
+.custom-calendar .rdp-button_previous,
+.custom-calendar .rdp-button_next {
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  width: 32px;
+  height: 32px;
+  color: white;
+  transition: all 0.2s;
+}
+
+.custom-calendar .rdp-button_previous:hover,
+.custom-calendar .rdp-button_next:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.custom-calendar .rdp-weekday {
+  color: #71717a; /* zinc-500 */
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.custom-calendar .rdp-day {
+  color: white;
+  border-radius: 0.5rem;
+  transition: all 0.15s;
+}
+
+.custom-calendar .rdp-day:hover:not(.rdp-day_disabled) {
+  background-color: var(--rdp-background-color);
+}
+
+.custom-calendar .rdp-selected,
+.custom-calendar .rdp-selected:focus-visible,
+.custom-calendar .rdp-selected:hover {
+  background: linear-gradient(to top right, #8b5cf6, #6366f1) !important; /* purple to indigo */
+  color: white !important;
+  font-weight: bold;
+  border-radius: 0.5rem;
+  transform: scale(1.05);
+  box-shadow: 0 10px 15px -3px rgba(139, 92, 246, 0.2);
+}
+
+.custom-calendar .rdp-today {
+  color: #d8b4fe; /* purple-300 */
+  font-weight: bold;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.custom-calendar .rdp-outside {
+  color: #52525b; /* zinc-600 */
+  opacity: 0.5;
+}
+
+/* Modifiers logic for HasAgenda */
+.custom-calendar .hasAgenda {
+  position: relative;
+  font-weight: bold;
+}
+
+.custom-calendar .hasAgenda::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  background-color: #a855f7; /* purple-500 */
+  border-radius: 50%;
+}
+
+.custom-calendar .rdp-selected.hasAgenda::after {
+  background-color: white; /* Contrast when selected */
+}
