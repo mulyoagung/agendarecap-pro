@@ -6,6 +6,7 @@ import { id } from "date-fns/locale";
 import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings } from "lucide-react";
 import { useState } from "react";
 import Link from "next/link";
+import Swal from "sweetalert2";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { AddAgendaModal } from "@/components/AddAgendaModal";
@@ -98,9 +99,42 @@ export default function Dashboard() {
       markAsShared(dateKey, new Date().toISOString());
       
       setTimeout(() => setIsCopied(false), 2000);
-      alert("Rekap berhasil disalin!");
+      Swal.fire({
+        icon: 'success',
+        title: 'Tersalin!',
+        text: 'Rekap berhasil disalin ke clipboard.',
+        timer: 1500,
+        showConfirmButton: false,
+        toast: true,
+        position: 'top-end'
+      });
     } catch (e) {
-      alert("Gagal menyalin teks.");
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal',
+        text: 'Gagal menyalin teks ke clipboard.',
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 2000
+      });
+    }
+  };
+
+  const handleDeleteAgenda = async (id: string, title: string) => {
+    const confirm = await Swal.fire({
+      title: 'Hapus Agenda?',
+      text: `Agenda "${title}" akan dihapus permanen.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Ya, Hapus!'
+    });
+
+    if (confirm.isConfirmed) {
+      deleteAgenda(id);
+      Swal.fire({ icon: 'success', title: 'Terhapus!', text: 'Agenda berhasil dihapus.', timer: 1500, showConfirmButton: false });
     }
   };
 
@@ -306,7 +340,7 @@ export default function Dashboard() {
                                 <Edit2 className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => deleteAgenda(agenda.id)}
+                                onClick={() => handleDeleteAgenda(agenda.id, agenda.title)}
                                 className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors border border-transparent hover:border-red-400/20"
                                 title="Hapus Agenda"
                               >

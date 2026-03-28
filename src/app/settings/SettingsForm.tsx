@@ -6,6 +6,7 @@ import { Reorder, motion } from "framer-motion";
 import { GripVertical, Save, CheckCircle2, ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import Swal from "sweetalert2";
 
 interface SettingsFormProps {
   initialSettings?: Partial<AppSettings>;
@@ -48,9 +49,18 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
 
       if (res.success) {
         setSuccessMsg("Pengaturan berhasil disimpan.");
+        Swal.fire({
+          icon: 'success',
+          title: 'Tersimpan!',
+          text: 'Pengaturan berhasil disimpan.',
+          timer: 1500,
+          showConfirmButton: false,
+          toast: true,
+          position: 'top-end'
+        });
         router.refresh();
       } else {
-        alert("Gagal menyimpan: " + res.error);
+        Swal.fire({ icon: 'error', title: 'Gagal', text: res.error });
       }
     });
   };

@@ -5,6 +5,7 @@ import { Users, Shield, Trash2, RefreshCw, ChevronLeft, CheckCircle2, AlertCircl
 import Link from "next/link";
 import { useState, useEffect, useTransition } from "react";
 import { getUsers, deleteUser, resetUserPassword, approveUser } from "@/app/actions/admin";
+import Swal from "sweetalert2";
 
 interface UserProfile {
   id: string;
@@ -26,11 +27,11 @@ export default function AdminDashboard() {
       if (result.success && result.data) {
         setUsers(result.data as UserProfile[]);
       } else {
-        alert("Akses ditolak: " + result.error);
+        await Swal.fire({ icon: 'error', title: 'Akses Ditolak', text: result.error });
         window.location.href = "/";
       }
     } catch (err: any) {
-      alert("Akses ditolak: catch - " + err.message);
+      await Swal.fire({ icon: 'error', title: 'Akses Ditolak', text: err.message });
       window.location.href = "/";
     }
     setLoading(false);
@@ -40,39 +41,63 @@ export default function AdminDashboard() {
     fetchUsers();
   }, []);
 
-  const handleDelete = (id: string) => {
-    if (!confirm("Yakin ingin menghapus pengguna ini secara permanen?")) return;
+  const handleDelete = async (id: string, email: string) => {
+    const confirm = await Swal.fire({
+      title: 'Hapus Pengguna?',
+      text: `Anda yakin ingin menghapus akun ${email} secara permanen?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Ya, Hapus!'
+    });
+    
+    if (!confirm.isConfirmed) return;
+
     startTransition(async () => {
       const res = await deleteUser(id);
       if (res.success) {
         setUsers(users.filter(u => u.id !== id));
+        Swal.fire({ icon: 'success', title: 'Terhapus!', text: 'Pengguna berhasil dihapus.', timer: 1500, showConfirmButton: false });
       } else {
-        alert("Gagal menghapus: " + res.error);
+        Swal.fire({ icon: 'error', title: 'Gagal menghapus', text: res.error });
       }
     });
   };
 
-  const handleReset = (id: string) => {
-    const newPass = prompt("Masukkan password baru untuk pengguna ini:");
+  const handleReset = async (id: string, email: string) => {
+    const { value: newPass } = await Swal.fire({
+      title: `Reset Password`,
+      text: `Masukkan password baru untuk ${email}`,
+      input: 'password',
+      inputPlaceholder: 'Password baru',
+      showCancelButton: true,
+      inputValidator: (value) => {
+        if (!value) return 'Password tidak boleh kosong!'
+        if (value.length < 6) return 'Password minimal 6 karakter!'
+      }
+    });
+    
     if (!newPass) return;
     
     startTransition(async () => {
       const res = await resetUserPassword(id, newPass);
       if (res.success) {
-        alert("Password berhasil direset!");
+        Swal.fire({ icon: 'success', title: 'Berhasil!', text: 'Password berhasil direset.', timer: 1500, showConfirmButton: false });
       } else {
-        alert("Gagal reset password: " + res.error);
+        Swal.fire({ icon: 'error', title: 'Gagal reset password', text: res.error });
       }
     });
   };
 
-  const handleApprove = (id: string) => {
+  const handleApprove = async (id: string) => {
     startTransition(async () => {
       const res = await approveUser(id);
       if (res.success) {
         setUsers(users.map(u => u.id === id ? { ...u, status: 'approved' } : u));
+        Swal.fire({ icon: 'success', title: 'Disetujui!', text: 'Pengguna berhasil di-approve.', timer: 1500, showConfirmButton: false });
       } else {
-        alert("Gagal approve: " + res.error);
+        Swal.fire({ icon: 'error', title: 'Gagal approve', text: res.error });
       }
     });
   };
@@ -184,7 +209,7 @@ export default function AdminDashboard() {
                           </button>
                         )}
                         <button 
-                          onClick={() => handleReset(user.id)}
+                          onClick={() => handleReset(user.id, user.email)}
                           disabled={isPending}
                           className="p-2 text-zinc-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors border border-transparent hover:border-blue-400/20"
                           title="Reset Password"
@@ -192,10 +217,10 @@ export default function AdminDashboard() {
                           <RefreshCw className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => handleDelete(user.id)}
-                          disabled={user.role === 'admin' || isPending}
+                          onClick={() => handleDelete(user.id, user.email)}
+                          disabled={isPending}
                           className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-zinc-400 border border-transparent hover:border-red-400/20"
-                          title={user.role === 'admin' ? "Tidak bisa menghapus admin" : "Hapus Pengguna"}
+                          title="Hapus Pengguna"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
