@@ -18,6 +18,7 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
   const [notes, setNotes] = useState("");
   const [includeNotes, setIncludeNotes] = useState(false);
   const [time, setTime] = useState("09:00");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -37,16 +38,18 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
     }
   }, [isOpen, editAgenda]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !location) return;
 
+    setIsSubmitting(true);
     const scheduledDate = new Date(editAgenda ? new Date(editAgenda.scheduled_at) : defaultDate);
     const [hours, minutes] = time.split(":").map(Number);
     scheduledDate.setHours(hours, minutes, 0, 0);
 
+    let success = false;
     if (editAgenda) {
-      updateAgenda(editAgenda.id, {
+      success = await updateAgenda(editAgenda.id, {
         title,
         location,
         notes,
@@ -54,7 +57,7 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
         scheduled_at: scheduledDate.toISOString(),
       });
     } else {
-      addAgenda({
+      success = await addAgenda({
         title,
         location,
         notes,
@@ -63,7 +66,10 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
       });
     }
 
-    onClose();
+    setIsSubmitting(false);
+    if (success) {
+      onClose();
+    }
   };
 
   return (
@@ -171,9 +177,12 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
               <div className="pt-4">
                 <button
                   type="submit"
-                  className="w-full py-4 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-400 hover:to-indigo-400 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/25 transition-all outline-none focus:ring-2 focus:ring-purple-500/50 active:scale-95"
+                  disabled={isSubmitting}
+                  className="w-full flex items-center justify-center gap-2 py-4 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-400 hover:to-indigo-400 text-white font-semibold rounded-xl shadow-lg shadow-purple-500/25 transition-all outline-none focus:ring-2 focus:ring-purple-500/50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {editAgenda ? "Simpan Perubahan" : "Simpan Agenda"}
+                  {isSubmitting ? (
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : editAgenda ? "Simpan Perubahan" : "Simpan Agenda"}
                 </button>
               </div>
             </form>

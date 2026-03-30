@@ -21,11 +21,12 @@ export default function Dashboard() {
   const [editingAgenda, setEditingAgenda] = useState<Agenda | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
 
-  const { agendas, sharedDates, toggleComplete, deleteAgenda, markAsShared } = useStore();
+  const { agendas, sharedDates, toggleComplete, deleteAgenda, markAsShared, isLoading, error, fetchAgendas } = useStore();
 
   useEffect(() => {
     getAppSettings().then(setAppSettings);
-  }, []);
+    fetchAgendas();
+  }, [fetchAgendas]);
 
   const selectedAgendas = agendas
     .filter((a) => isSameDay(new Date(a.scheduled_at), selectedDate))
@@ -275,7 +276,28 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   <AnimatePresence mode="popLayout">
-                    {selectedAgendas.length > 0 ? (
+                    {isLoading ? (
+                      <tr>
+                        <td colSpan={5} className="py-24 text-center">
+                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                            <div className="w-8 h-8 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin mb-4" />
+                            <h3 className="text-lg text-zinc-400 font-semibold mb-1">Memuat Data</h3>
+                            <p className="text-zinc-500 text-sm">Menyinkronkan dengan database...</p>
+                          </motion.div>
+                        </td>
+                      </tr>
+                    ) : error ? (
+                      <tr>
+                        <td colSpan={5} className="py-24 text-center">
+                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center max-w-sm mx-auto p-6 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                            <Shield className="w-10 h-10 text-red-400 mb-3" />
+                            <h3 className="text-lg text-red-400 font-semibold mb-1">Terjadi Kesalahan</h3>
+                            <p className="text-red-400/80 text-sm">{error}</p>
+                            <button onClick={() => fetchAgendas()} className="mt-4 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg text-sm font-medium transition-colors">Coba Lagi</button>
+                          </motion.div>
+                        </td>
+                      </tr>
+                    ) : selectedAgendas.length > 0 ? (
                       selectedAgendas.map((agenda, index) => (
                         <motion.tr
                           layout
