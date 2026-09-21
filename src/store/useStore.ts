@@ -41,7 +41,21 @@ type StoreState = {
   subscribeRealtime: () => () => void;
 };
 
-export const useStore = create<StoreState>((set, get) => ({
+export const useStore = create<StoreState>((set, get) => {
+  // B-1: Deduplication helper — canonical ID wins, last-write wins on duplicates
+  function deduplicateAgendas(agendas: Agenda[]): Agenda[] {
+    const map = new Map<string, Agenda>();
+    for (const a of agendas) {
+      if (!a?.id) continue;
+      const existing = map.get(a.id);
+      if (!existing || (a.updated_at && a.updated_at > (existing.updated_at || ''))) {
+        map.set(a.id, a);
+      }
+    }
+    return Array.from(map.values());
+  }
+
+  return {
   agendas: [],
   sharedDates: {},
   isLoading: true,
@@ -54,13 +68,13 @@ export const useStore = create<StoreState>((set, get) => ({
     try {
       // 1. Instant local IndexedDB load (Local First)
       const localAgendas = await agendaRepository.getLocal();
-      set({ agendas: localAgendas as Agenda[], isLoading: false });
+      set({ agendas: deduplicateAgendas(localAgendas as Agenda[]), isLoading: false });
 
       // 2. Background Sync if online
       if (typeof navigator !== 'undefined' && navigator.onLine) {
         await syncRepository.runSync();
         const updatedLocal = await agendaRepository.getLocal();
-        set({ agendas: updatedLocal as Agenda[] });
+        set({ agendas: deduplicateAgendas(updatedLocal as Agenda[]) });
       }
     } catch (e: any) {
       console.error("Fetch agendas error:", e);
@@ -73,10 +87,12 @@ export const useStore = create<StoreState>((set, get) => ({
       // 1. Local-first Repository Create
       const newAgenda = await agendaRepository.create(agenda as any);
 
-      // 2. Update UI State immediately
+      // 2. Update UI State immediately (deduplicated)
       set((state) => ({
-        agendas: [...state.agendas.filter(a => a.id !== newAgenda.id), newAgenda as Agenda].sort(
-          (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+        agendas: deduplicateAgendas(
+          [...state.agendas.filter(a => a.id !== newAgenda.id), newAgenda as Agenda]
+        ).sort(
+          (a, b) => new Date(a.scheduled_at || 0).getTime() - new Date(b.scheduled_at || 0).getTime()
         ),
       }));
 
@@ -211,4 +227,5 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ subscriptionActive: false });
     };
   }
-}));
+  };
+});

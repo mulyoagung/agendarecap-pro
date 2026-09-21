@@ -171,11 +171,13 @@ export default function AdminDashboard() {
                     <td className="px-6 py-4 text-white font-medium">{user.email}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 text-xs font-semibold rounded-lg ${
-                        user.role === 'admin' 
-                          ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
-                          : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
+                        user.role === 'super_admin' || user.role === 'superadmin'
+                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold'
+                          : user.role === 'admin' 
+                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
+                            : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
                       }`}>
-                        {user.role.toUpperCase()}
+                        {user.role ? user.role.toUpperCase() : 'USER'}
                       </span>
                     </td>
                     <td className="px-6 py-4">
@@ -198,7 +200,7 @@ export default function AdminDashboard() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
-                        {user.status !== 'approved' && user.role !== 'admin' && (
+                        {user.status !== 'approved' && !['admin', 'super_admin', 'superadmin'].includes(user.role?.toLowerCase()) && (
                           <button 
                             onClick={() => handleApprove(user.id)}
                             disabled={isPending}

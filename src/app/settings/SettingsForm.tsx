@@ -7,6 +7,7 @@ import { GripVertical, Save, CheckCircle2, ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Swal from "sweetalert2";
+import { isNativePlatform, navigateNative } from "@/lib/native-alarm";
 
 interface SettingsFormProps {
   initialSettings?: Partial<AppSettings>;
@@ -73,7 +74,12 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
           toast: true,
           position: 'top-end'
         });
-        router.refresh();
+        // Only call router.refresh() in non-native env; on static export it is a no-op or causes navigation issues
+        try {
+          router.refresh();
+        } catch (_) {
+          // Ignore refresh error on native/static export
+        }
       } else {
         Swal.fire({ icon: 'error', title: 'Gagal', text: res.error });
       }
@@ -189,12 +195,22 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
       </div>
 
       <div className="flex justify-between items-center pt-4 sticky bottom-6 z-10 p-4 bg-[#121214]/80 backdrop-blur-md rounded-2xl border border-white/10 shadow-2xl">
-        <Link 
-          href="/" 
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg hover:bg-white/10 transition-colors text-zinc-300 hover:text-white font-medium"
-        >
-          <ChevronLeft className="w-4 h-4" /> Kembali ke Beranda
-        </Link>
+        {isNativePlatform() ? (
+          <button
+            type="button"
+            onClick={() => navigateNative('index.html')}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg hover:bg-white/10 transition-colors text-zinc-300 hover:text-white font-medium"
+          >
+            <ChevronLeft className="w-4 h-4" /> Kembali ke Beranda
+          </button>
+        ) : (
+          <Link 
+            href="/" 
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg hover:bg-white/10 transition-colors text-zinc-300 hover:text-white font-medium"
+          >
+            <ChevronLeft className="w-4 h-4" /> Kembali ke Beranda
+          </Link>
+        )}
         <button
           type="submit"
           disabled={isPending}

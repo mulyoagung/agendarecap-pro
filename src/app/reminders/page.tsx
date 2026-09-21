@@ -13,11 +13,19 @@ import ConnectivityBanner from "@/components/ConnectivityBanner";
 export default function RemindersPage() {
   const { reminders, occurrences, dbSynced, isOffline, fetchReminders, addReminder, updateReminder, reactivateReminder, toggleReminder, deleteReminder, snoozeOccurrence, completeOccurrence, triggerSync } = useReminderStore();
 
+  // Helper: get current local time as HH:mm (device local time, not UTC)
+  const getLocalNowHHmm = () => {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  };
+
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [bodyText, setBodyText] = useState("");
-  const [time, setTime] = useState("08:00");
+  const [time, setTime] = useState(getLocalNowHHmm);
   const [scheduledDate, setScheduledDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [timezone, setTimezone] = useState<string>("Asia/Jakarta");
   const [frequency, setFrequency] = useState<Frequency>("once");
@@ -203,8 +211,10 @@ export default function RemindersPage() {
         daysOfWeek: frequency === 'weekly' ? [new Date(scheduledDate).getDay()] : undefined
       });
       Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pengingat Diperbarui & Diunggah', showConfirmButton: false, timer: 1500 });
+      resetForm();
     } else {
-      await addReminder({
+      // addReminder returns boolean — only show success if it returned true
+      const success = await addReminder({
         title,
         body: bodyText,
         time,
@@ -215,16 +225,18 @@ export default function RemindersPage() {
         sound,
         daysOfWeek: frequency === 'weekly' ? [new Date(scheduledDate).getDay()] : undefined
       });
-      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pengingat Dijadwalkan & Diunggah', showConfirmButton: false, timer: 1500 });
+      if (success) {
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pengingat Dijadwalkan & Diunggah', showConfirmButton: false, timer: 1500 });
+        resetForm();
+      }
+      // If !success, the store already showed an error Swal — don't resetForm so user can fix time
     }
-
-    resetForm();
   };
 
   const resetForm = () => {
     setTitle("");
     setBodyText("");
-    setTime("08:00");
+    setTime(getLocalNowHHmm());  // Reset to current local time, not static 08:00
     setScheduledDate(new Date().toISOString().split('T')[0]);
     setFrequency("once");
     setSound("default");
@@ -273,10 +285,23 @@ export default function RemindersPage() {
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
             <a
-              href="/downloads/AgendaRecap_Pro_v0.1.0.apk"
-              download="AgendaRecap_Pro_v0.1.0.apk"
+              href="/downloads/AgendaRecap_Pro.apk"
+              download="AgendaRecap_Pro.apk"
+              onClick={(e) => {
+                if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform()) {
+                  e.preventDefault();
+                  Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'info',
+                    title: 'Aplikasi AgendaRecap Pro sudah berjalan di perangkat Android Native.',
+                    showConfirmButton: false,
+                    timer: 3000
+                  });
+                }
+              }}
               className="p-3 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-xl transition-all text-emerald-300 flex items-center gap-2 text-xs font-bold"
-              title="Download APK AgendaRecap Pro v0.1.0"
+              title="Download APK AgendaRecap Pro"
             >
               <Download className="w-4 h-4 text-emerald-400" />
               <span className="hidden sm:inline">Download APK</span>

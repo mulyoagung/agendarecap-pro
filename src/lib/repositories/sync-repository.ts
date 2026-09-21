@@ -5,7 +5,8 @@ import {
   getAgendasFromIDB, 
   saveAgendasToIDB, 
   getRemindersFromIDB, 
-  saveRemindersToIDB, 
+  saveRemindersToIDB,
+  deleteReminderFromIDB, 
   getOccurrencesFromIDB, 
   saveOccurrencesToIDB,
   repairOrphanDataAndQueueInIDB,
@@ -24,18 +25,24 @@ import {
 
 export function serializeSupabaseError(error: unknown) {
   if (!error) return null;
-  if (typeof error === 'object') {
+  if (typeof error === 'object' && error !== null) {
     const e = error as Record<string, unknown>;
+    const rawMsg = String(e.message || e.details || e.hint || '');
+    const code = String(e.code || 'UNKNOWN');
+    const displayMsg = rawMsg && rawMsg !== '1' && rawMsg !== '{}' && rawMsg !== '[object Object]'
+      ? rawMsg 
+      : `Gagal komunikasi Supabase (Code: ${code})`;
     return {
-      message: e.message || String(error),
-      code: e.code || 'UNKNOWN',
+      message: displayMsg,
+      code,
       details: e.details || null,
       hint: e.hint || null,
       name: e.name || 'SupabaseError',
       stringified: JSON.stringify(error),
     };
   }
-  return { message: String(error) };
+  const str = String(error);
+  return { message: str && str !== '1' ? str : 'Gagal sinkronisasi database' };
 }
 
 let activeSyncPromise: Promise<{ success: boolean; syncedCount: number; errors: string[] }> | null = null;
@@ -193,8 +200,11 @@ export class SyncRepository {
           let queryError: any = null;
 
           if (item.entity_type === 'agenda') {
-            if (item.operation === 'CREATE' || item.operation === 'UPDATE') {
+            if (item.operation === 'CREATE') {
               const sanitizedPayload = sanitizeAgendaForSupabase(item.payload);
+              if (!sanitizedPayload.id) {
+                sanitizedPayload.id = item.entity_id;
+              }
               if (user && (!sanitizedPayload.user_id || sanitizedPayload.user_id === 'undefined')) {
                 sanitizedPayload.user_id = user.id;
               }
@@ -204,13 +214,30 @@ export class SyncRepository {
                 .upsert(sanitizedPayload);
               queryError = error;
               success = !error;
-            } else if (item.operation === 'DELETE') {
+            } else if (item.operation === 'UPDATE') {
+              const sanitizedPayload = sanitizeAgendaForSupabase(item.payload);
+              delete sanitizedPayload.id; // Primary key column remains unchanged
+              if (user && (!sanitizedPayload.user_id || sanitizedPayload.user_id === 'undefined')) {
+                sanitizedPayload.user_id = user.id;
+              }
+
               const { error } = await supabase
                 .from('agendas')
-                .delete()
+                .update(sanitizedPayload)
                 .eq('id', item.entity_id);
               queryError = error;
               success = !error;
+            } else if (item.operation === 'DELETE') {
+              const { data, error } = await supabase
+                .from('agendas')
+                .delete()
+                .eq('id', item.entity_id)
+                .select();
+              queryError = error;
+              success = !error;
+              if (!error) {
+                console.log(`[SYNC] Agenda DELETE completed: ${data?.length || 0} row(s) deleted in Supabase for ID ${item.entity_id}`);
+              }
             }
           } else if (item.entity_type === 'reminder') {
             if (item.operation === 'CREATE') {
@@ -218,18 +245,21 @@ export class SyncRepository {
               const occurrencePayload = item.payload.occurrence ? sanitizeOccurrenceForSupabase(item.payload.occurrence) : null;
 
               if (user) {
-                if (!reminderPayload.user_id || reminderPayload.user_id === 'undefined') reminderPayload.user_id = user.id;
-                if (occurrencePayload && (!occurrencePayload.user_id || occurrencePayload.user_id === 'undefined')) occurrencePayload.user_id = user.id;
+                if (!reminderPayload.user_id || reminderPayload.user_id === 'undefined') {
+                  reminderPayload.user_id = user.id;
+                }
               }
 
               const { error: rErr } = await supabase.from('reminders').upsert(reminderPayload);
+              let oErr: any = null;
 
               if (occurrencePayload && occurrencePayload.id) {
-                await supabase.from('reminder_occurrences').upsert(occurrencePayload);
+                const { error } = await supabase.from('reminder_occurrences').upsert(occurrencePayload);
+                oErr = error;
               }
 
-              queryError = rErr;
-              success = !rErr;
+              queryError = rErr || oErr;
+              success = !rErr && !oErr;
             } else if (item.operation === 'UPDATE') {
               const sanitizedPayload = sanitizeReminderForSupabase(item.payload);
               delete sanitizedPayload.id;
@@ -241,12 +271,31 @@ export class SyncRepository {
               queryError = error;
               success = !error;
             } else if (item.operation === 'DELETE') {
-              const { error } = await supabase
+              const { data, error } = await supabase
                 .from('reminders')
                 .delete()
-                .eq('id', item.entity_id);
+                .eq('id', item.entity_id)
+                .select();
               queryError = error;
               success = !error;
+              if (error) {
+                console.error('[SYNC] Reminder DELETE failed with Supabase error:', {
+                  reminderId: item.entity_id,
+                  mutationId: rawItem.id,
+                  operation: 'DELETE',
+                  errorCode: error.code,
+                  errorMessage: error.message,
+                  errorDetails: error.details,
+                  authenticatedUser: user?.id || 'UNAUTHENTICATED'
+                });
+              } else {
+                const deletedCount = data ? data.length : 0;
+                if (deletedCount === 0) {
+                  console.warn(`[SYNC] Reminder DELETE completed with 0 rows affected in Supabase for ID ${item.entity_id}. (Row may already be deleted or RLS user_id mismatch). User: ${user?.id || 'UNAUTHENTICATED'}`);
+                } else {
+                  console.log(`[SYNC] Reminder DELETE succeeded: deleted ${deletedCount} row(s) in Supabase for ID ${item.entity_id}`);
+                }
+              }
             }
           } else if (item.entity_type === 'occurrence') {
             if (item.operation === 'SNOOZE') {
@@ -413,11 +462,45 @@ export class SyncRepository {
         }
 
         if (remoteReminders && Array.isArray(remoteReminders)) {
+          // Collect IDs of reminders that are pending/retryable DELETE locally.
+          // These must be skipped during reconciliation or they get re-inserted from server.
+          const pendingDeleteReminderIds = new Set(
+            rawQueue
+              .filter(i =>
+                i.entity_type === 'reminder' &&
+                i.operation === 'DELETE' &&
+                i.status !== 'FAILED_FATAL'
+              )
+              .map(i => i.entity_id)
+          );
+
+          const pendingMutationReminderIds = new Set(
+            rawQueue
+              .filter(i => i.entity_type === 'reminder')
+              .map(i => i.entity_id)
+          );
+
+          const remoteReminderIds = new Set(remoteReminders.map((r: any) => r.id));
           const localReminders = await getRemindersFromIDB();
           const reminderMap = new Map<string, IDBReminder>();
           localReminders.forEach(r => reminderMap.set(r.id, r));
 
+          // Purge local reminders deleted on remote (Web)
+          for (const local of localReminders) {
+            if (local.user_id === user.id && !remoteReminderIds.has(local.id) && !pendingMutationReminderIds.has(local.id)) {
+              console.log(`[SYNC] Purging local reminder ${local.id} — deleted on remote server`);
+              reminderMap.delete(local.id);
+              await deleteReminderFromIDB(local.id);
+            }
+          }
+
           remoteReminders.forEach((r: any) => {
+            // Skip reminders that are locally queued for deletion
+            if (pendingDeleteReminderIds.has(r.id)) {
+              console.log(`[SYNC] Skipping re-insert of reminder ${r.id} — pending local DELETE`);
+              return;
+            }
+
             const local = reminderMap.get(r.id);
             const remoteTime = new Date(r.updated_at).getTime();
             const localTime = local?.updatedAt ? new Date(local.updatedAt).getTime() : 0;
@@ -447,10 +530,19 @@ export class SyncRepository {
 
         if (remoteOccurrences && Array.isArray(remoteOccurrences)) {
           const localOccurrences = await getOccurrencesFromIDB();
+          const activeReminderIds = new Set((await getRemindersFromIDB()).map(r => r.id));
+
           const occurrenceMap = new Map<string, IDBOccurrence>();
-          localOccurrences.forEach(o => occurrenceMap.set(o.id, o));
+          localOccurrences.forEach(o => {
+            // Only retain occurrences for active reminders
+            if (activeReminderIds.has(o.reminderId)) {
+              occurrenceMap.set(o.id, o);
+            }
+          });
 
           remoteOccurrences.forEach((o: any) => {
+            if (!activeReminderIds.has(o.reminder_id)) return;
+
             const local = occurrenceMap.get(o.id);
             const remoteTime = new Date(o.updated_at).getTime();
             const localTime = local?.updatedAt ? new Date(local.updatedAt).getTime() : 0;

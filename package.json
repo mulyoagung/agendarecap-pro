@@ -7,7 +7,9 @@
     "scheduler:dev": "node simulate-cron.js",
     "reminders:cleanup-test": "node scripts/cleanup-test.js",
     "build": "next build",
-    "build:native": "cross-env BUILD_TARGET=native next build",
+    "prebuild:native": "node -e \"if (require('fs').existsSync('public/downloads')) require('fs').readdirSync('public/downloads').filter(f=>f.endsWith('.apk')).forEach(f=>require('fs').unlinkSync('public/downloads/'+f)); if (require('fs').existsSync('src/app/admin')) require('fs').renameSync('src/app/admin','src/app/_admin'); if (require('fs').existsSync('src/app/actions/admin.ts')) require('fs').renameSync('src/app/actions/admin.ts','src/app/actions/_admin.ts')\"",
+    "build:native": "npm run prebuild:native && cross-env BUILD_TARGET=native next build && npm run postbuild:native",
+    "postbuild:native": "node -e \"if (require('fs').existsSync('src/app/_admin')) require('fs').renameSync('src/app/_admin','src/app/admin'); if (require('fs').existsSync('src/app/actions/_admin.ts')) require('fs').renameSync('src/app/actions/_admin.ts','src/app/actions/admin.ts')\"",
     "start": "next start",
     "lint": "eslint"
   },
@@ -17,6 +19,7 @@
     "@capacitor/core": "^8.5.1",
     "@capacitor/haptics": "^8.0.2",
     "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/network": "^8.0.1",
     "@capacitor/push-notifications": "^8.1.2",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.100.0",

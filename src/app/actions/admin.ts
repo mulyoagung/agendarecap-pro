@@ -1,13 +1,20 @@
-import { createClient } from '@supabase/supabase-js'
-import { createClient as createBrowserClient } from "@/lib/supabase/client";
+'use server';
+
+import { createClient } from '@supabase/supabase-js';
+import { createClient as createServerSupabase } from "@/lib/supabase/server";
 
 // We need a service role client to bypass RLS and manage users
 function getAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   
   if (!supabaseUrl) {
-    throw new Error("Missing Supabase env vars")
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL environment variable");
+  }
+
+  if (!supabaseServiceKey) {
+    console.warn("[WARNING] SUPABASE_SERVICE_ROLE_KEY is missing on server environment! Admin API operations will fail.");
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY environment variable is required for Admin operations");
   }
 
   return createClient(supabaseUrl, supabaseServiceKey, {
@@ -15,24 +22,24 @@ function getAdminClient() {
       autoRefreshToken: false,
       persistSession: false
     }
-  })
+  });
 }
 
 // Verify if the caller is an admin using Service Role to bypass any RLS issues
 async function checkIsAdmin(): Promise<{ isAdmin: boolean, reason?: string }> {
   try {
-    const supabase = createBrowserClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
+    const serverSupabase = await createServerSupabase();
+    const { data: { user }, error: authError } = await serverSupabase.auth.getUser();
+
     if (authError || !user) {
-      return { isAdmin: false, reason: "No active user found or auth error: " + (authError?.message || '') };
+      return { isAdmin: false, reason: "No active authenticated session: " + (authError?.message || 'Unauthenticated') };
     }
 
     let supabaseAdmin;
     try {
       supabaseAdmin = getAdminClient();
     } catch (e: any) {
-      return { isAdmin: false, reason: "Missing env vars: " + e.message };
+      return { isAdmin: false, reason: "Admin Client Error: " + e.message };
     }
 
     const { data: profile, error } = await supabaseAdmin
@@ -42,11 +49,14 @@ async function checkIsAdmin(): Promise<{ isAdmin: boolean, reason?: string }> {
       .single();
 
     if (error) {
-      return { isAdmin: false, reason: "Failed finding profile: " + error.message };
+      return { isAdmin: false, reason: "Failed finding user profile: " + error.message };
     }
 
-    if (profile?.role !== 'admin') {
-      return { isAdmin: false, reason: "Role is not admin: " + profile?.role };
+    const allowedRoles = ['admin', 'super_admin', 'superadmin'];
+    const userRole = profile?.role ? String(profile.role).toLowerCase() : '';
+
+    if (!userRole || !allowedRoles.includes(userRole)) {
+      return { isAdmin: false, reason: "Role not authorized: " + (profile?.role || 'null') };
     }
 
     return { isAdmin: true };

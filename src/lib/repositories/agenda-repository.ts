@@ -63,18 +63,19 @@ export class AgendaRepository {
     const updatedAgenda: IDBAgenda = {
       ...existing,
       ...updates,
+      id,
       updated_at: now
     };
 
     // 1. Write local IndexedDB
     await updateSingleAgendaInIDB(updatedAgenda);
 
-    // 2. Enqueue mutation
+    // 2. Enqueue mutation with explicit canonical entity_id and id in payload
     await addToOfflineQueue({
       entity_type: 'agenda',
       entity_id: id,
       operation: 'UPDATE',
-      payload: updates,
+      payload: { ...updates, id },
       retry_count: 0,
       status: 'PENDING'
     });

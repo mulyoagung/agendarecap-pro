@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useState, createContext, useContext } from "react";
+import { useEffect, useState, createContext, useContext, useCallback } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { User, Session } from "@supabase/supabase-js";
 import { CalendarHeart, RefreshCw } from "lucide-react";
 
+import { isNativePlatform, navigateNative } from "@/lib/native-alarm";
+
+export type AuthState = 'INITIALIZING' | 'AUTHENTICATED' | 'UNAUTHENTICATED';
+
 export type AuthContextType = {
   session: Session | null;
   user: User | null;
   authLoading: boolean;
+  authState: AuthState;
   isOnline: boolean;
   syncStatus: 'idle' | 'syncing' | 'success' | 'error';
   lastSyncAt: string | null;
@@ -24,6 +29,7 @@ const AuthContext = createContext<AuthContextType>({
   session: null,
   user: null,
   authLoading: true,
+  authState: 'INITIALIZING',
   isOnline: true,
   syncStatus: 'idle',
   lastSyncAt: null,
@@ -36,12 +42,17 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
-const PUBLIC_ROUTES = ['/login', '/waiting-approval'];
+const PUBLIC_ROUTES = ['/login', '/login.html', '/waiting-approval', '/waiting-approval.html'];
+
+function checkIsPublicRoute(currentPath: string): boolean {
+  if (!currentPath) return false;
+  return PUBLIC_ROUTES.some(r => currentPath === r || currentPath.endsWith(r));
+}
 
 export default function ClientAuthGuard({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authState, setAuthState] = useState<AuthState>('INITIALIZING');
   const [isOnline, setIsOnline] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
@@ -53,76 +64,124 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const router = useRouter();
 
-  const isPublicRoute = PUBLIC_ROUTES.includes(pathname || '');
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : (pathname || '');
+  const isPublicRoute = checkIsPublicRoute(currentPath) || checkIsPublicRoute(pathname || '');
 
-  const checkAuthAndSyncQueue = async () => {
-    if (typeof window === 'undefined') return;
-
+  // Helper to fetch IDB offline queue stats
+  const refreshQueueStats = useCallback(async () => {
     try {
-      console.log('[AUTH] initialization started');
-      const supabase = createClient();
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      
-      if (currentSession) {
-        console.log('[AUTH] session found');
-        console.log('[AUTH] user found');
-        console.log(`[AUTH] user id: ${currentSession.user.id}`);
-      } else {
-        console.log('[AUTH] session missing');
-        console.log('[AUTH] user missing');
-      }
-
-      setSession(currentSession);
-      setUser(currentSession?.user || null);
-
-      // Check IDB queue
       const { getOfflineQueueDebugInfo } = await import("@/lib/idb");
       const qInfo = await getOfflineQueueDebugInfo();
       setPendingQueueCount(qInfo.pending);
       setFailedQueueCount(qInfo.failedRetryable + qInfo.failedFatal);
+    } catch (_) { /* IDB not available yet */ }
+  }, []);
+
+  const refreshAuth = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const supabase = createClient();
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+      console.log('[AUTH GUARD] Manual auth refresh:', {
+        sessionExists: !!currentSession,
+        userId: currentSession?.user?.id || 'none'
+      });
+
+      setSession(currentSession);
+      setUser(currentSession?.user || null);
+
+      if (currentSession) {
+        setAuthState('AUTHENTICATED');
+      } else {
+        setAuthState('UNAUTHENTICATED');
+      }
+
+      await refreshQueueStats();
     } catch (e: any) {
-      console.warn('[AUTH] Check session notice:', e);
-    } finally {
-      setAuthLoading(false);
+      console.warn('[AUTH GUARD] Manual refresh notice:', e);
+      setAuthState('UNAUTHENTICATED');
     }
-  };
+  }, [refreshQueueStats]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     setIsOnline(navigator.onLine);
-    checkAuthAndSyncQueue();
+    const isNative = isNativePlatform();
+
+    console.log('[AUTH GUARD] Component mounted, state machine initialized as INITIALIZING', {
+      href: window.location.href,
+      pathname: window.location.pathname,
+      isNative,
+      isPublicRoute
+    });
 
     const supabase = createClient();
 
-    // Subscribe to Auth State Changes
+    // 1. Subscribe to Auth State Changes FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: string, newSession: Session | null) => {
-      console.log(`[AUTH] Auth Event: ${event}`);
+      console.log(`[AUTH GUARD] Auth Event: ${event}, Session Exists: ${!!newSession}`);
       setLastAuthEvent(event);
       setSession(newSession);
       setUser(newSession?.user || null);
-      setAuthLoading(false);
 
-      if (event === 'SIGNED_OUT') {
-        console.log('[AUTH] signed out');
-        const { useStore } = await import("@/store/useStore");
-        useStore.setState({ agendas: [], sharedDates: {} });
-        if (!PUBLIC_ROUTES.includes(window.location.pathname)) {
-          router.replace('/login');
-        }
-      } else if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-        if (event === 'SIGNED_IN') console.log('[AUTH] signed in');
+      if (event === 'INITIAL_SESSION') {
         if (newSession) {
-          console.log(`[AUTH] user id: ${newSession.user.id}`);
-          if (window.location.pathname === '/login') {
-            router.replace('/');
-          }
+          console.log('[AUTH GUARD] INITIAL_SESSION resolved -> AUTHENTICATED');
+          setAuthState('AUTHENTICATED');
+        } else {
+          console.log('[AUTH GUARD] INITIAL_SESSION resolved -> UNAUTHENTICATED');
+          setAuthState('UNAUTHENTICATED');
         }
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        console.log(`[AUTH GUARD] Event ${event} -> AUTHENTICATED`);
+        setAuthState('AUTHENTICATED');
+      } else if (event === 'SIGNED_OUT') {
+        console.log('[AUTH GUARD] SIGNED_OUT -> UNAUTHENTICATED');
+        setAuthState('UNAUTHENTICATED');
+        try {
+          const { useStore } = await import("@/store/useStore");
+          useStore.setState({ agendas: [], sharedDates: {} });
+        } catch (_) {}
+      } else if (newSession) {
+        setAuthState('AUTHENTICATED');
       }
     });
 
+    // 2. Hydrate session asynchronously
+    const hydrateSession = async () => {
+      try {
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        setSession(initialSession);
+        setUser(initialSession?.user || null);
+
+        if (initialSession) {
+          console.log('[AUTH GUARD] getSession found session -> AUTHENTICATED');
+          setAuthState('AUTHENTICATED');
+        } else {
+          // If getSession returned null, transition from INITIALIZING to UNAUTHENTICATED
+          console.log('[AUTH GUARD] getSession null -> Transitioning from INITIALIZING to UNAUTHENTICATED');
+          setAuthState(prev => (prev === 'INITIALIZING' ? 'UNAUTHENTICATED' : prev));
+        }
+
+        await refreshQueueStats();
+      } catch (err) {
+        console.warn('[AUTH GUARD] Hydration exception:', err);
+        setAuthState('UNAUTHENTICATED');
+      }
+    };
+
+    hydrateSession();
+
     // Network Online / Offline Listeners
-    const handleOnline = () => setIsOnline(true);
+    const handleOnline = () => {
+      setIsOnline(true);
+      import("@/lib/sync-engine").then(({ runSyncEngine }) => {
+        runSyncEngine().then(() => refreshQueueStats()).catch(err => console.warn('[AUTH GUARD] Online sync notice:', err));
+      });
+    };
     const handleOffline = () => setIsOnline(false);
 
     window.addEventListener('online', handleOnline);
@@ -133,23 +192,44 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [router]);
+  }, [refreshQueueStats]);
 
-  // Route protection redirect effect
+  // Route Protection & Navigation State Machine Effect
   useEffect(() => {
-    if (authLoading) return;
-
-    if (!session && !isPublicRoute) {
-      console.log(`[AUTH GUARD] Unauthenticated access to protected route "${pathname}" -> Redirecting to /login`);
-      router.replace('/login');
-    } else if (session && pathname === '/login') {
-      console.log(`[AUTH GUARD] Authenticated session active -> Redirecting from /login to /`);
-      router.replace('/');
+    // RULE A: While state is INITIALIZING, DO NOT redirect anywhere!
+    if (authState === 'INITIALIZING') {
+      console.log('[AUTH GUARD] State is INITIALIZING -> Holding current route in loading state.');
+      return;
     }
-  }, [session, authLoading, isPublicRoute, pathname, router]);
 
-  // Render Full Screen Loading state while verifying auth session
-  if (authLoading) {
+    const isNative = isNativePlatform();
+    const curPath = typeof window !== 'undefined' ? window.location.pathname : (pathname || '');
+    const onPublic = checkIsPublicRoute(curPath) || checkIsPublicRoute(pathname || '');
+
+    // RULE B: Protected route handling when strictly UNAUTHENTICATED
+    if (authState === 'UNAUTHENTICATED' && !onPublic) {
+      console.warn(`[AUTH GUARD] Auth state UNAUTHENTICATED on protected route "${curPath}" -> Navigating to login`);
+      if (isNative) {
+        navigateNative('login.html', true);
+      } else {
+        router.replace('/login');
+      }
+    } 
+    // RULE C: Public login route handling when strictly AUTHENTICATED
+    else if (authState === 'AUTHENTICATED' && onPublic && (curPath === '/login' || curPath.endsWith('/login.html') || pathname === '/login')) {
+      console.log(`[AUTH GUARD] Auth state AUTHENTICATED on public login route "${curPath}" -> Navigating to index`);
+      if (isNative) {
+        navigateNative('index.html', true);
+      } else {
+        router.replace('/');
+      }
+    }
+  }, [authState, pathname, router]);
+
+  const authLoading = authState === 'INITIALIZING';
+
+  // Render Loading Screen while state machine is INITIALIZING
+  if (authState === 'INITIALIZING') {
     return (
       <div className="min-h-screen bg-[#0A0A0B] flex flex-col items-center justify-center p-4 relative overflow-hidden">
         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-500/20 rounded-full blur-[140px] pointer-events-none" />
@@ -172,8 +252,8 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
     );
   }
 
-  // If unauthenticated and on protected route, return loading screen until router.replace finishes
-  if (!session && !isPublicRoute) {
+  // Render Transition Screen if UNAUTHENTICATED on protected route while navigateNative/router.replace resolves
+  if (authState === 'UNAUTHENTICATED' && !isPublicRoute) {
     return (
       <div className="min-h-screen bg-[#0A0A0B] flex flex-col items-center justify-center p-4">
         <div className="glass p-6 rounded-[2rem] border border-white/10 flex flex-col items-center gap-3 text-center">
@@ -187,6 +267,7 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
     session,
     user,
     authLoading,
+    authState,
     isOnline,
     syncStatus,
     lastSyncAt,
@@ -194,7 +275,7 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
     pendingQueueCount,
     failedQueueCount,
     lastAuthEvent,
-    refreshAuth: checkAuthAndSyncQueue
+    refreshAuth
   };
 
   return (

@@ -119,17 +119,29 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+export function deduplicateById<T extends { id: string }>(items: T[]): T[] {
+  if (!Array.isArray(items)) return [];
+  const map = new Map<string, T>();
+  for (const item of items) {
+    if (item && item.id) {
+      map.set(item.id, item);
+    }
+  }
+  return Array.from(map.values());
+}
+
 // ==========================================
 // AGENDAS OPERATIONAL API
 // ==========================================
 
 export async function saveAgendasToIDB(agendas: IDBAgenda[]): Promise<void> {
   if (!agendas || agendas.length === 0) return;
+  const uniqueAgendas = deduplicateById(agendas);
   try {
     const db = await openDB();
     const tx = db.transaction('agendas', 'readwrite');
     const store = tx.objectStore('agendas');
-    for (const item of agendas) {
+    for (const item of uniqueAgendas) {
       store.put(item);
     }
     return new Promise((resolve, reject) => {
@@ -148,7 +160,7 @@ export async function getAgendasFromIDB(): Promise<IDBAgenda[]> {
     const store = tx.objectStore('agendas');
     const request = store.getAll();
     return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result || []);
+      request.onsuccess = () => resolve(deduplicateById(request.result || []));
       request.onerror = () => reject(request.error);
     });
   } catch (e) {
@@ -243,7 +255,7 @@ export async function updateSingleReminderInIDB(reminder: IDBReminder): Promise<
 export async function deleteReminderFromIDB(id: string): Promise<void> {
   try {
     const db = await openDB();
-    const tx = db.transaction('reminders', 'readwrite');
+    const tx = db.transaction(['reminders', 'occurrences'], 'readwrite');
     const storeReminders = tx.objectStore('reminders');
     const storeOccurrences = tx.objectStore('occurrences');
 
@@ -335,17 +347,73 @@ export async function addToOfflineQueue(item: Omit<IDBOfflineQueueItem, 'id' | '
     const id = item.id || crypto.randomUUID();
     const now = Date.now();
 
-    const fullItem: IDBOfflineQueueItem = {
-      ...item,
-      id,
-      created_at: now,
-      retry_count: item.retry_count || 0,
-      status: item.status || 'PENDING',
-      type: item.type,
-      createdAt: item.createdAt || now
-    };
+    const request = store.getAll();
+    await new Promise<void>((resolve, reject) => {
+      request.onsuccess = () => {
+        const existingItems = (request.result || []) as IDBOfflineQueueItem[];
 
-    store.put(fullItem);
+        if (item.operation === 'DELETE') {
+          // Check if there is an UNSYNCED pending CREATE for this entity
+          const pendingUnsyncedCreate = existingItems.find(
+            i => i.entity_type === item.entity_type &&
+                 i.entity_id === item.entity_id &&
+                 i.operation === 'CREATE' &&
+                 (i.status === 'PENDING' || i.status === 'FAILED_RETRYABLE' || i.status === 'FAILED_FATAL')
+          );
+
+          if (pendingUnsyncedCreate) {
+            // Item was created offline and deleted offline BEFORE ever reaching server!
+            // Safe to cancel out: remove ALL queue items for this entity_id (no remote mutation needed)
+            console.log(`[IDB QUEUE] Unsynced local entity ${item.entity_id} deleted offline — cancelling pending CREATE queue items.`);
+            for (const i of existingItems) {
+              if (i.entity_type === item.entity_type && i.entity_id === item.entity_id) {
+                store.delete(i.id);
+              }
+            }
+            return resolve();
+          }
+
+          // If entity was already synced to server (or no unsynced CREATE exists),
+          // we MUST enqueue the DELETE operation to mutate Supabase!
+          // Remove any pending UPDATE items for this entity_id to prevent redundant mutations.
+          for (const i of existingItems) {
+            if (i.entity_type === item.entity_type && i.entity_id === item.entity_id && i.operation === 'UPDATE') {
+              store.delete(i.id);
+            }
+          }
+        } else if (item.operation === 'UPDATE') {
+          // Check if there is a pending CREATE for this entity
+          const pendingCreate = existingItems.find(
+            i => i.entity_type === item.entity_type && i.entity_id === item.entity_id && i.operation === 'CREATE'
+          );
+
+          if (pendingCreate) {
+            // Merge the updates into the pending CREATE payload
+            pendingCreate.payload = {
+              ...pendingCreate.payload,
+              ...item.payload
+            };
+            store.put(pendingCreate);
+            return resolve();
+          }
+        }
+
+        const fullItem: IDBOfflineQueueItem = {
+          ...item,
+          id,
+          created_at: now,
+          retry_count: item.retry_count || 0,
+          status: item.status || 'PENDING',
+          type: item.type,
+          createdAt: item.createdAt || now
+        };
+
+        store.put(fullItem);
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+
     return new Promise((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -504,8 +572,14 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
               item.payload.reminder.user_id = userId;
               updated = true;
             }
-            if (item.payload.occurrence && (!item.payload.occurrence.user_id || item.payload.occurrence.user_id === 'undefined')) {
-              item.payload.occurrence.user_id = userId;
+            if (item.payload.occurrence) {
+              if ('user_id' in item.payload.occurrence) {
+                delete item.payload.occurrence.user_id;
+                updated = true;
+              }
+            }
+            if (item.entity_type === 'occurrence' && item.payload && 'user_id' in item.payload) {
+              delete item.payload.user_id;
               updated = true;
             }
           }

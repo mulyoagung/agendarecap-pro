@@ -36,7 +36,7 @@ export default function ConnectivityBanner() {
       if (res.success) {
         setSyncState('success');
         setIsSupabaseReachable(true);
-        setLastSyncTime(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
+        setLastSyncTime(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }));
       } else {
         setSyncState('error');
         setSyncErrorMsg(res.errors[0] || 'Sync failed');
@@ -50,7 +50,7 @@ export default function ConnectivityBanner() {
   useEffect(() => {
     checkSupabaseReachability();
     if (isOnline) {
-      setLastSyncTime(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
+      setLastSyncTime(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }));
     }
   }, [isOnline]);
 
@@ -117,7 +117,7 @@ export default function ConnectivityBanner() {
           onClick={handleManualTriggerSync}
           disabled={syncState === 'syncing' || !isOnline}
           className="flex items-center gap-1.5 px-3 py-1 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 rounded-full text-purple-300 hover:text-purple-200 font-semibold transition-all active:scale-95 disabled:opacity-50"
-          title="Jalankan Sinkronisasi Supabase"
+          title={syncErrorMsg || "Jalankan Sinkronisasi Supabase"}
         >
           {syncState === 'syncing' ? (
             <>
@@ -127,7 +127,7 @@ export default function ConnectivityBanner() {
           ) : syncState === 'error' ? (
             <>
               <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-              <span className="text-red-400">Sync Gagal</span>
+              <span className="text-red-400">{syncErrorMsg ? (syncErrorMsg.length > 25 ? `${syncErrorMsg.substring(0, 25)}...` : syncErrorMsg) : 'Sync Gagal'}</span>
             </>
           ) : (
             <>

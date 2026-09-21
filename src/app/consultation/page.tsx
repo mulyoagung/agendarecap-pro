@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useState, useEffect, useCallback } from "react";
 import { useStore, Agenda } from "@/store/useStore";
-import { Shield, Clock, CalendarHeart, X, Check, ArrowLeft, Edit2, AlertCircle, Star } from "lucide-react";
+import { Shield, Clock, CalendarHeart, X, Check, ArrowLeft, Edit2, AlertCircle, Star, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { format } from "date-fns";
@@ -23,7 +23,7 @@ function useDebounceCallback<Args extends any[]>(callback: (...args: Args) => vo
 
 
 export default function ConsultationPage() {
-  const { agendas, updateAgenda, fetchAgendas, addAgenda, isLoading } = useStore();
+  const { agendas, updateAgenda, deleteAgenda, fetchAgendas, addAgenda, isLoading } = useStore();
   const [newConsultation, setNewConsultation] = useState("");
 
   useEffect(() => {
@@ -59,10 +59,28 @@ export default function ConsultationPage() {
     }
   };
 
-  const handleCancelDate = async (agenda: Agenda) => {
-    const success = await updateAgenda(agenda.id, { status: 'cancelled' });
+  const handleCancelConsultation = async (agenda: Agenda) => {
+    // Return to unscheduled — do NOT assign a date or mark as cancelled
+    const success = await updateAgenda(agenda.id, { status: 'unscheduled', scheduled_at: null as any });
     if (success) {
-      Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Jadwal Dibatalkan', showConfirmButton: false, timer: 1500 });
+      Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Dikembalikan ke Belum Terjadwal', showConfirmButton: false, timer: 1500 });
+    }
+  };
+
+  const handleDeleteAgenda = async (agenda: Agenda) => {
+    const confirm = await Swal.fire({
+      title: 'Hapus Agenda?',
+      text: `Agenda "${agenda.title}" akan dihapus permanen.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Ya, Hapus!',
+      cancelButtonText: 'Batal'
+    });
+    if (confirm.isConfirmed) {
+      await deleteAgenda(agenda.id);
+      Swal.fire({ icon: 'success', title: 'Terhapus!', text: 'Agenda berhasil dihapus.', timer: 1500, showConfirmButton: false });
     }
   };
 
@@ -156,7 +174,8 @@ export default function ConsultationPage() {
                   key={agenda.id} 
                   agenda={agenda} 
                   onConfirm={handleConfirm}
-                  onCancel={handleCancelDate}
+                  onCancelConsultation={handleCancelConsultation}
+                  onDelete={handleDeleteAgenda}
                   onDateChange={handleDateChange}
                   onNotesChange={handleNotesChange}
                   onToggleUrgent={() => updateAgenda(agenda.id, { isUrgent: !agenda.isUrgent })}
@@ -189,10 +208,11 @@ export default function ConsultationPage() {
 }
 
 // Subcomponent for isolating local input states and preventing full list re-renders
-function ConsultationCard({ agenda, onConfirm, onCancel, onDateChange, onNotesChange, onToggleUrgent }: {
+function ConsultationCard({ agenda, onConfirm, onCancelConsultation, onDelete, onDateChange, onNotesChange, onToggleUrgent }: {
   agenda: Agenda, 
   onConfirm: (a: Agenda) => void,
-  onCancel: (a: Agenda) => void,
+  onCancelConsultation: (a: Agenda) => void,
+  onDelete: (a: Agenda) => void,
   onDateChange: (id: string, date: string) => void,
   onNotesChange: (id: string, val: string) => void,
   onToggleUrgent: () => void
@@ -364,10 +384,18 @@ function ConsultationCard({ agenda, onConfirm, onCancel, onDateChange, onNotesCh
         
         <div className="flex gap-2">
           <button
-            onClick={() => onCancel(agenda)}
-            className="flex-1 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl transition-all text-sm font-semibold flex items-center justify-center gap-2"
+            onClick={() => onCancelConsultation(agenda)}
+            className="flex-1 px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-xl transition-all text-sm font-semibold flex items-center justify-center gap-2"
+            title="Kembalikan ke Belum Terjadwal — tidak menghapus agenda"
           >
-            <X className="w-4 h-4" /> Batal / Tolak
+            <X className="w-4 h-4" /> Batal Konsultasi
+          </button>
+          <button
+            onClick={() => onDelete(agenda)}
+            className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl transition-all text-sm font-semibold flex items-center justify-center gap-2"
+            title="Hapus agenda ini permanen"
+          >
+            <Trash2 className="w-4 h-4" />
           </button>
           <button
             onClick={() => onConfirm(agenda)}

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AppSettings, getAppSettings } from "@/app/actions/settings";
 import { SettingsForm } from "./SettingsForm";
 import { createClient } from "@/lib/supabase/client";
+import { isNativePlatform } from "@/lib/native-alarm";
 
 export default function SettingsPage() {
   const [initialSettings, setInitialSettings] = useState<AppSettings | null>(null);
@@ -15,13 +16,21 @@ export default function SettingsPage() {
         const supabase = createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          window.location.href = "/login";
+          if (isNativePlatform()) {
+            window.location.replace("/login.html");
+          } else {
+            window.location.href = "/login";
+          }
           return;
         }
 
         const { data: profile } = await supabase.from('profiles').select('status').eq('id', user.id).single();
         if (profile?.status === 'pending') {
-          window.location.href = "/waiting-approval";
+          if (isNativePlatform()) {
+            window.location.replace("/waiting-approval.html");
+          } else {
+            window.location.href = "/waiting-approval";
+          }
           return;
         }
 

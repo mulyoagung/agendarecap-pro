@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client"
+import { isNativePlatform } from "@/lib/native-alarm"
 
 export async function login(formData: FormData) {
   const email = formData.get("email") as string
@@ -29,11 +30,23 @@ export async function login(formData: FormData) {
 
   const { data: profile } = await supabase.from('profiles').select('status').eq('id', session.user.id).single()
   if (profile?.status === 'pending') {
-    if (typeof window !== 'undefined') window.location.href = "/waiting-approval"
+    if (typeof window !== 'undefined') {
+      if (isNativePlatform()) {
+        window.location.href = "/waiting-approval.html"
+      } else {
+        window.location.href = "/waiting-approval"
+      }
+    }
     return null
   }
 
-  if (typeof window !== 'undefined') window.location.href = "/"
+  if (typeof window !== 'undefined') {
+    if (isNativePlatform()) {
+      window.location.href = "/index.html"
+    } else {
+      window.location.href = "/"
+    }
+  }
   return null
 }
 
@@ -52,12 +65,24 @@ export async function signup(formData: FormData) {
   }
   
   // New users are pending by default
-  if (typeof window !== 'undefined') window.location.href = "/waiting-approval"
+  if (typeof window !== 'undefined') {
+    if (isNativePlatform()) {
+      window.location.href = "/waiting-approval.html"
+    } else {
+      window.location.href = "/waiting-approval"
+    }
+  }
   return null
 }
 
 export async function logout() {
   const supabase = createClient()
   await supabase.auth.signOut()
-  if (typeof window !== 'undefined') window.location.href = "/login"
+  if (typeof window !== 'undefined') {
+    if (isNativePlatform()) {
+      window.location.href = "/login.html"
+    } else {
+      window.location.href = "/login"
+    }
+  }
 }

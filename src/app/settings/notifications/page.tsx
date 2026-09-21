@@ -140,7 +140,7 @@ export default function NotificationSettingsPage() {
 
       if (activeOccs.length > 0) {
         const nextTarget = new Date(activeOccs[0].scheduledAt);
-        setNextAlarmTime(nextTarget.toLocaleString('id-ID'));
+        setNextAlarmTime(nextTarget.toLocaleString('id-ID', { hour12: false }));
       } else {
         setNextAlarmTime("Tidak ada");
       }
@@ -170,7 +170,7 @@ export default function NotificationSettingsPage() {
 
     const savedLastSync = localStorage.getItem('last_sync_timestamp');
     if (savedLastSync) {
-      setLastSyncTime(new Date(parseInt(savedLastSync)).toLocaleString('id-ID'));
+      setLastSyncTime(new Date(parseInt(savedLastSync)).toLocaleString('id-ID', { hour12: false }));
     }
 
     setIsRefreshing(false);
@@ -508,13 +508,26 @@ export default function NotificationSettingsPage() {
 
           <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
             <a
-              href="/downloads/AgendaRecap_Pro_v0.1.0.apk"
-              download="AgendaRecap_Pro_v0.1.0.apk"
+              href="/downloads/AgendaRecap_Pro.apk"
+              download="AgendaRecap_Pro.apk"
+              onClick={(e) => {
+                if (isNativePlatform()) {
+                  e.preventDefault();
+                  Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'info',
+                    title: 'Aplikasi AgendaRecap Pro sudah berjalan di perangkat Android Native.',
+                    showConfirmButton: false,
+                    timer: 3000
+                  });
+                }
+              }}
               className="px-4 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-xl transition-all text-emerald-300 flex items-center gap-2 text-xs font-black shadow-lg shadow-emerald-500/10"
-              title="Download File APK Android AgendaRecap Pro v0.1.0"
+              title="Download File APK Android AgendaRecap Pro"
             >
               <Download className="w-4 h-4 text-emerald-400" />
-              <span>DOWNLOAD APK (v0.1.0)</span>
+              <span>DOWNLOAD APK</span>
             </a>
 
             <button

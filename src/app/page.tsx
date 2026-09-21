@@ -17,6 +17,7 @@ import { logout } from "./login/actions";
 import { getAppSettings, AppSettings } from "@/app/actions/settings";
 import { useEffect } from "react";
 import ConnectivityBanner from "@/components/ConnectivityBanner";
+import { isNativePlatform, navigateNative } from "@/lib/native-alarm";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -37,6 +38,28 @@ export default function Dashboard() {
     getAppSettings().then(setAppSettings);
     fetchAgendas();
   }, [fetchAgendas]);
+
+  // Native-aware navigation helper
+  const handleNativeNav = (webPath: string, htmlFile: string) => (e: React.MouseEvent) => {
+    if (isNativePlatform()) {
+      e.preventDefault();
+      setIsSystemMenuOpen(false);
+
+      if (webPath === '/admin') {
+        Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'info',
+          title: 'Menu Kelola User (Admin) hanya dapat diakses via server Web.',
+          showConfirmButton: false,
+          timer: 3500
+        });
+        return;
+      }
+
+      navigateNative(htmlFile);
+    }
+  };
 
   const selectedAgendas = agendas
     .filter((a) => isSameDay(new Date(a.scheduled_at), selectedDate) && a.status !== 'unscheduled')
@@ -267,7 +290,7 @@ export default function Dashboard() {
 
                         <Link
                           href="/admin"
-                          onClick={() => setIsSystemMenuOpen(false)}
+                          onClick={handleNativeNav('/admin', 'admin.html')}
                           className="flex items-center gap-3 px-3 py-2.5 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors font-medium"
                         >
                           <Shield className="w-4 h-4 text-blue-400" />
@@ -276,12 +299,36 @@ export default function Dashboard() {
 
                         <Link
                           href="/settings"
-                          onClick={() => setIsSystemMenuOpen(false)}
+                          onClick={handleNativeNav('/settings', 'settings.html')}
                           className="flex items-center gap-3 px-3 py-2.5 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors font-medium"
                         >
                           <Settings className="w-4 h-4 text-purple-400" />
                           <span>Pengaturan Aplikasi</span>
                         </Link>
+
+                        <a
+                          href="/downloads/AgendaRecap_Pro.apk"
+                          download="AgendaRecap_Pro.apk"
+                          onClick={(e) => {
+                            setIsSystemMenuOpen(false);
+                            if (isNativePlatform()) {
+                              e.preventDefault();
+                              Swal.fire({
+                                toast: true,
+                                position: 'top-end',
+                                icon: 'info',
+                                title: 'Aplikasi AgendaRecap Pro sudah berjalan di perangkat Android Native.',
+                                showConfirmButton: false,
+                                timer: 3000
+                              });
+                            }
+                          }}
+                          className="flex items-center gap-3 px-3 py-2.5 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors font-medium"
+                          title="Download File APK Android"
+                        >
+                          <Download className="w-4 h-4 text-emerald-400" />
+                          <span>Download APK Android</span>
+                        </a>
 
                         <div className="border-t border-white/5 my-1" />
 
@@ -303,7 +350,7 @@ export default function Dashboard() {
             </div>
             
             {/* Primary Quick Actions Bar (Frequently Used) */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <Link 
                 href="/consultation"
                 className="flex items-center justify-center gap-2 px-3 py-2.5 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 rounded-xl transition-all text-orange-200 hover:text-white group text-xs font-semibold"
@@ -318,15 +365,6 @@ export default function Dashboard() {
                 <BellRing className="w-4 h-4 text-blue-400 shrink-0" />
                 <span className="truncate">Pengingat</span>
               </Link>
-              <a
-                href="/downloads/AgendaRecap_Pro_v0.1.0.apk"
-                download="AgendaRecap_Pro_v0.1.0.apk"
-                className="flex items-center justify-center gap-2 px-3 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl transition-all text-emerald-200 hover:text-white group text-xs font-semibold"
-                title="Download File APK Android AgendaRecap Pro v0.1.0"
-              >
-                <Download className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="truncate">APK v0.1.0</span>
-              </a>
             </div>
           </header>
 
@@ -372,18 +410,28 @@ export default function Dashboard() {
                   <div className="pt-4 flex flex-col gap-3 mt-2 border-t border-white/10 max-h-[300px] overflow-y-auto hide-scrollbar">
                     {unscheduledAgendas.length > 0 ? (
                       unscheduledAgendas.map(agenda => (
-                        <div key={agenda.id} className="p-3 bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 transition-colors flex justify-between items-start gap-4">
-                          <div>
-                            <p className="font-semibold text-white text-sm">{agenda.title}</p>
-                            <p className="text-xs text-zinc-400">{agenda.location}</p>
+                        <div key={agenda.id} className="p-3 bg-white/5 border border-purple-500/10 rounded-xl hover:bg-white/10 transition-colors flex justify-between items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-white text-sm truncate">{agenda.title}</p>
+                            <p className="text-xs text-zinc-400 truncate">{agenda.location}</p>
+                            <span className="mt-1 inline-flex px-1.5 py-0.5 rounded-full text-[9px] bg-purple-500/10 text-purple-400 font-bold uppercase tracking-wider border border-purple-500/20">Belum Terjadwal</span>
                           </div>
-                          <button
-                            onClick={() => handleEdit(agenda)}
-                            className="p-1.5 text-zinc-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors border border-transparent"
-                            title="Kembalikan ke Kalender"
-                          >
-                            <CalendarRange className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => handleEdit(agenda)}
+                              className="p-1.5 text-zinc-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
+                              title="Edit / Jadwalkan"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteAgenda(agenda.id, agenda.title)}
+                              className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                              title="Hapus Agenda"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       ))
                     ) : (

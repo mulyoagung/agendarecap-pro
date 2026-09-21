@@ -43,7 +43,7 @@ interface ReminderStoreState {
     frequency?: Frequency;
     sound?: string;
     daysOfWeek?: number[];
-  }) => Promise<void>;
+  }) => Promise<boolean>;
   updateReminder: (id: string, input: {
     title: string;
     body?: string;
@@ -116,27 +116,41 @@ export const useReminderStore = create<ReminderStoreState>()(
       },
 
       addReminder: async (input) => {
-        // 1. Local-first Repository Create
-        const { reminder, occurrence } = await reminderRepository.create(input);
+        try {
+          // 1. Local-first Repository Create (throws if time is expired)
+          const { reminder, occurrence } = await reminderRepository.create(input);
 
-        // 2. Schedule Native Alarm if on Android
-        if (isNativePlatform()) {
-          scheduleNativeLocalAlarm({
-            reminderId: reminder.id,
-            occurrenceId: occurrence.id,
-            title: reminder.title,
-            body: reminder.body || '',
-            sound: reminder.sound || 'default',
-            scheduledAt: occurrence.scheduledAt
+          // 2. Schedule Native Alarm if on Android
+          if (isNativePlatform()) {
+            scheduleNativeLocalAlarm({
+              reminderId: reminder.id,
+              occurrenceId: occurrence.id,
+              title: reminder.title,
+              body: reminder.body || '',
+              sound: reminder.sound || 'default',
+              scheduledAt: occurrence.scheduledAt
+            });
+          }
+
+          // 3. Update UI State immediately
+          await get().fetchReminders();
+
+          // 4. Trigger background sync
+          if (typeof navigator !== 'undefined' && navigator.onLine) {
+            syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
+          }
+
+          return true;
+        } catch (e: any) {
+          // Surface validation errors (e.g. expired time) to the user
+          const { default: Swal } = await import('sweetalert2');
+          Swal.fire({
+            icon: 'warning',
+            title: 'Waktu Tidak Valid',
+            text: e?.message || 'Gagal menjadwalkan pengingat.',
+            confirmButtonText: 'Oke'
           });
-        }
-
-        // 3. Update UI State immediately
-        await get().fetchReminders();
-
-        // 4. Trigger background sync
-        if (typeof navigator !== 'undefined' && navigator.onLine) {
-          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
+          return false;
         }
       },
 
@@ -229,15 +243,50 @@ export const useReminderStore = create<ReminderStoreState>()(
       },
 
       deleteReminder: async (id) => {
-        // 1. Local-first Repository Delete
+        const isOnline = typeof navigator !== 'undefined' && navigator.onLine;
+
+        // 1. Local-first Repository Delete (removes from IDB + enqueues DELETE)
         await reminderRepository.delete(id);
 
-        // 2. Update UI State
+        // 2. Also clean up any pending occurrence queue items for this reminder
+        // to prevent orphaned operations from being sent after reminder is gone
+        try {
+          const { getOfflineQueue, removeFromOfflineQueue } = await import('@/lib/idb');
+          const queue = await getOfflineQueue();
+          const orphanOccurrenceItems = queue.filter(
+            i => i.entity_type === 'occurrence' && i.operation !== 'DELETE' &&
+              // We can detect reminder relationship via payload.reminder_id
+              (i.payload?.reminder_id === id || i.payload?.reminderId === id)
+          );
+          for (const item of orphanOccurrenceItems) {
+            await removeFromOfflineQueue(item.id);
+          }
+        } catch (_) { /* non-critical */ }
+
+        // 3. Update UI State
         await get().fetchReminders();
 
-        // 3. Background Sync
-        if (typeof navigator !== 'undefined' && navigator.onLine) {
-          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
+        // 4. Background Sync + user feedback
+        if (isOnline) {
+          const result = await syncRepository.runSync().catch(e => {
+            console.warn('[REMINDER STORE] Delete sync error:', e);
+            return { success: false, errors: [e.message] };
+          });
+          if (!result.success) {
+            const { default: Swal } = await import('sweetalert2');
+            Swal.fire({
+              toast: true, position: 'top-end', icon: 'warning',
+              title: 'Reminder dihapus lokal. Sinkronisasi ke server gagal — akan dicoba ulang.',
+              showConfirmButton: false, timer: 3000
+            });
+          }
+        } else {
+          const { default: Swal } = await import('sweetalert2');
+          Swal.fire({
+            toast: true, position: 'top-end', icon: 'info',
+            title: 'Reminder dihapus dari perangkat & akan disinkronkan saat koneksi tersedia.',
+            showConfirmButton: false, timer: 3000
+          });
         }
       },
 

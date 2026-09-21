@@ -42,14 +42,50 @@ export class ReminderRepository {
     if (!scheduledAtISO && input.time) {
       const targetDateStr = input.scheduledDate || now.toISOString().split("T")[0];
       scheduledAtISO = getUTCISOFromLocal(targetDateStr, input.time, userTimezone);
-      if (new Date(scheduledAtISO).getTime() < now.getTime() && !input.scheduledDate) {
-        const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-        const tomorrowStr = tomorrow.toISOString().split("T")[0];
-        scheduledAtISO = getUTCISOFromLocal(tomorrowStr, input.time, userTimezone);
-      }
     }
 
     if (!scheduledAtISO) scheduledAtISO = now.toISOString();
+
+    const frequency = input.frequency || 'once';
+    const scheduledMs = new Date(scheduledAtISO).getTime();
+    const nowMs = now.getTime();
+
+    // B-4: Validate — reject past times for one-time reminders
+    if (frequency === 'once') {
+      if (scheduledMs <= nowMs) {
+        throw new Error('Waktu reminder sudah lewat. Pilih waktu yang masih akan datang.');
+      }
+    } else {
+      // For recurring reminders: if current slot already passed today, advance to next valid occurrence
+      if (scheduledMs <= nowMs) {
+        const daysOfWeek = input.daysOfWeek;
+
+        if (frequency === 'daily') {
+          const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+          const tomorrowStr = tomorrow.toISOString().split("T")[0];
+          scheduledAtISO = getUTCISOFromLocal(tomorrowStr, input.time!, userTimezone);
+        } else if (frequency === 'weekdays') {
+          let next = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+          while (next.getDay() === 0 || next.getDay() === 6) {
+            next = new Date(next.getTime() + 24 * 60 * 60 * 1000);
+          }
+          scheduledAtISO = getUTCISOFromLocal(next.toISOString().split("T")[0], input.time!, userTimezone);
+        } else if (frequency === 'weekly' && daysOfWeek && daysOfWeek.length > 0) {
+          const targetDay = daysOfWeek[0];
+          let next = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+          let attempts = 0;
+          while (next.getDay() !== targetDay && attempts < 7) {
+            next = new Date(next.getTime() + 24 * 60 * 60 * 1000);
+            attempts++;
+          }
+          scheduledAtISO = getUTCISOFromLocal(next.toISOString().split("T")[0], input.time!, userTimezone);
+        } else {
+          // fallback daily
+          const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+          scheduledAtISO = getUTCISOFromLocal(tomorrow.toISOString().split("T")[0], input.time!, userTimezone);
+        }
+      }
+    }
 
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();

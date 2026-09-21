@@ -70,6 +70,44 @@ export function isNativePlatform(): boolean {
 }
 
 /**
+ * Safely navigates to a target static HTML file or route in Native/Capacitor environment.
+ * Prevents root origin leading-slash bugs on file:// or custom WebView schemes.
+ */
+export function navigateNative(targetFile: string, replace = false): void {
+  if (typeof window === 'undefined') return;
+
+  const cleanFile = targetFile.startsWith('/') ? targetFile.substring(1) : targetFile;
+  let targetUrl = '/' + cleanFile;
+
+  if (isNativePlatform()) {
+    const href = window.location.href;
+    const protocol = window.location.protocol;
+
+    if (protocol === 'file:') {
+      const publicIndex = href.indexOf('/public/');
+      if (publicIndex !== -1) {
+        const publicBase = href.substring(0, publicIndex + 8);
+        targetUrl = publicBase + cleanFile;
+      } else {
+        const lastSlash = href.lastIndexOf('/');
+        targetUrl = href.substring(0, lastSlash + 1) + cleanFile;
+      }
+    } else {
+      targetUrl = window.location.origin + '/' + cleanFile;
+    }
+  }
+
+  console.log(`[NATIVE NAV] Request: "${targetFile}" -> Resolved: "${targetUrl}" (replace=${replace})`);
+
+  if (replace) {
+    window.location.replace(targetUrl);
+  } else {
+    window.location.href = targetUrl;
+  }
+}
+
+
+/**
  * Imports pending native user actions (e.g. COMPLETE / SNOOZE pressed from Android notifications while app was closed)
  * into local IndexedDB repository and triggers offline queue sync.
  */
