@@ -54,7 +54,7 @@ interface ReminderStoreState {
     sound?: string;
     daysOfWeek?: number[];
   }) => Promise<void>;
-  reactivateReminder: (id: string) => Promise<void>;
+  reactivateReminder: (id: string, options?: { scheduledDate?: string; scheduledAt?: string }) => Promise<void>;
   snoozeOccurrence: (reminderId: string, occurrenceId: string, minutes: number) => Promise<void>;
   completeOccurrence: (reminderId: string, occurrenceId: string) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
@@ -167,7 +167,7 @@ export const useReminderStore = create<ReminderStoreState>()(
         }
       },
 
-      reactivateReminder: async (id) => {
+      reactivateReminder: async (id: string, options?: { scheduledDate?: string; scheduledAt?: string }) => {
         const target = get().reminders.find(r => r.id === id);
         if (!target) return;
 
@@ -179,7 +179,9 @@ export const useReminderStore = create<ReminderStoreState>()(
           timezone: target.timezone,
           frequency: target.frequency,
           sound: target.sound,
-          daysOfWeek: target.daysOfWeek
+          daysOfWeek: target.daysOfWeek,
+          scheduledDate: options?.scheduledDate,
+          scheduledAt: options?.scheduledAt
         });
 
         if (isNativePlatform()) {

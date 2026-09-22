@@ -11,6 +11,7 @@ import {
 import { getUTCISOFromLocal } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { sanitizeReminderForSupabase, sanitizeOccurrenceForSupabase } from "@/lib/repositories/sanitizer";
+import { isNativePlatform, cancelNativeLocalAlarm, getScheduledNativeAlarms } from "@/lib/native-alarm";
 
 export class ReminderRepository {
   async getLocalReminders(): Promise<IDBReminder[]> {
@@ -25,8 +26,8 @@ export class ReminderRepository {
     id?: string;
     title: string;
     body?: string;
-    time: string;
-    scheduledDate?: string;
+    time: string; // HH:mm
+    scheduledDate?: string; // YYYY-MM-DD
     scheduledAt?: string;
     timezone?: string;
     frequency?: 'once' | 'daily' | 'weekdays' | 'weekly';
@@ -50,10 +51,17 @@ export class ReminderRepository {
     const scheduledMs = new Date(scheduledAtISO).getTime();
     const nowMs = now.getTime();
 
-    // B-4: Validate — reject past times for one-time reminders
+    // B-4: Validate — reject past times for one-time reminders if explicit scheduledDate/scheduledAt provided
     if (frequency === 'once') {
       if (scheduledMs <= nowMs) {
-        throw new Error('Waktu reminder sudah lewat. Pilih waktu yang masih akan datang.');
+        if (input.scheduledDate || input.scheduledAt) {
+          throw new Error('Waktu reminder sudah lewat. Pilih waktu yang masih akan datang.');
+        } else {
+          // Default to tomorrow same local time if reactivating an expired one-time reminder without date override
+          const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+          const tomorrowStr = tomorrow.toISOString().split("T")[0];
+          scheduledAtISO = getUTCISOFromLocal(tomorrowStr, input.time || "08:00", userTimezone);
+        }
       }
     } else {
       // For recurring reminders: if current slot already passed today, advance to next valid occurrence
@@ -80,84 +88,87 @@ export class ReminderRepository {
           }
           scheduledAtISO = getUTCISOFromLocal(next.toISOString().split("T")[0], input.time!, userTimezone);
         } else {
-          // fallback daily
           const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-          scheduledAtISO = getUTCISOFromLocal(tomorrow.toISOString().split("T")[0], input.time!, userTimezone);
+          const tomorrowStr = tomorrow.toISOString().split("T")[0];
+          scheduledAtISO = getUTCISOFromLocal(tomorrowStr, input.time!, userTimezone);
         }
       }
     }
 
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
+    const userId = user?.id || 'offline_user';
 
-    const newReminder: IDBReminder = {
+    const nowISO = now.toISOString();
+
+    const reminder: IDBReminder = {
       id: reminderId,
-      user_id: user?.id,
-      title: input.title.trim(),
+      user_id: userId,
+      title: input.title,
       body: input.body || '',
-      time: input.time || "08:00",
+      time: input.time,
       timezone: userTimezone,
-      frequency: input.frequency || "once",
+      frequency: frequency,
       daysOfWeek: input.daysOfWeek,
-      sound: input.sound || "default",
       isActive: true,
+      sound: input.sound || 'default',
       deliveryMode: 'hybrid',
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString()
+      createdAt: nowISO,
+      updatedAt: nowISO
     };
 
-    const newOccurrence: IDBOccurrence = {
+    const occurrence: IDBOccurrence = {
       id: occurrenceId,
-      reminderId,
-      user_id: user?.id,
+      reminderId: reminderId,
+      user_id: userId,
       scheduledAt: scheduledAtISO,
-      status: "scheduled",
+      status: 'scheduled',
       notificationTag: `reminder-${reminderId}-occurrence-${occurrenceId}`,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString()
+      createdAt: nowISO,
+      updatedAt: nowISO
     };
 
-    // 1. Write local IndexedDB (Preserves full local structure for UI)
-    await updateSingleReminderInIDB(newReminder);
-    await updateOccurrenceInIDB(newOccurrence);
+    // Store in IDB synchronously
+    await updateSingleReminderInIDB(reminder);
+    await updateOccurrenceInIDB(occurrence);
 
-    // 2. Enqueue sanitized mutation payload for Supabase sync
+    // Enqueue Mutation for Supabase Sync Engine
+    const sanitizedRemPayload = sanitizeReminderForSupabase(reminder);
+    const sanitizedOccPayload = sanitizeOccurrenceForSupabase(occurrence);
+
     await addToOfflineQueue({
       entity_type: 'reminder',
       entity_id: reminderId,
       operation: 'CREATE',
       payload: {
-        reminder: sanitizeReminderForSupabase(newReminder),
-        occurrence: sanitizeOccurrenceForSupabase(newOccurrence)
+        reminder: sanitizedRemPayload,
+        occurrence: sanitizedOccPayload
       },
       retry_count: 0,
       status: 'PENDING'
     });
 
-    return { reminder: newReminder, occurrence: newOccurrence };
+    return { reminder, occurrence };
   }
 
   async update(id: string, updates: Partial<IDBReminder> & { scheduledDate?: string }): Promise<IDBReminder | null> {
-    const reminders = await this.getLocalReminders();
+    const reminders = await getRemindersFromIDB();
     const existing = reminders.find(r => r.id === id);
     if (!existing) return null;
 
-    const now = new Date();
-    const userTimezone = updates.timezone || existing.timezone || "Asia/Jakarta";
+    const nowISO = new Date().toISOString();
 
     const updatedReminderObj: IDBReminder = {
       ...existing,
       ...updates,
       title: updates.title ? updates.title.trim() : existing.title,
-      updatedAt: now.toISOString()
+      updatedAt: nowISO
     };
 
-    // 1. Write local IndexedDB
     await updateSingleReminderInIDB(updatedReminderObj);
 
-    // 2. Enqueue sanitized mutation payload for Supabase sync
     const sanitizedPayload = sanitizeReminderForSupabase(updates);
-    sanitizedPayload.updated_at = now.toISOString();
+    sanitizedPayload.updated_at = nowISO;
 
     await addToOfflineQueue({
       entity_type: 'reminder',
@@ -171,35 +182,58 @@ export class ReminderRepository {
     return updatedReminderObj;
   }
 
-  async snoozeOccurrence(reminderId: string, occurrenceId: string, minutes: number): Promise<IDBOccurrence | null> {
-    const occurrences = await this.getLocalOccurrences();
-    const target = occurrences.find(o => o.reminderId === reminderId && (o.id === occurrenceId || occurrenceId === 'unknown'));
+  async toggleActive(id: string, isActive: boolean): Promise<IDBReminder | null> {
+    const reminders = await getRemindersFromIDB();
+    const target = reminders.find(r => r.id === id);
+    if (!target) return null;
 
-    const now = new Date();
-    const snoozeDate = new Date(now.getTime() + minutes * 60 * 1000);
-    const snoozeISO = snoozeDate.toISOString();
+    const nowISO = new Date().toISOString();
+    const updated: IDBReminder = {
+      ...target,
+      isActive,
+      updatedAt: nowISO
+    };
+
+    await updateSingleReminderInIDB(updated);
+
+    const sanitizedPayload = sanitizeReminderForSupabase(updated);
+
+    await addToOfflineQueue({
+      entity_type: 'reminder',
+      entity_id: id,
+      operation: 'UPDATE',
+      payload: sanitizedPayload,
+      retry_count: 0,
+      status: 'PENDING'
+    });
+
+    return updated;
+  }
+
+  async snoozeOccurrence(reminderId: string, occurrenceId: string, minutes: number): Promise<IDBOccurrence | null> {
+    const occurrences = await getOccurrencesFromIDB();
+    const target = occurrences.find(o => o.id === occurrenceId);
 
     if (target) {
+      const nowISO = new Date().toISOString();
+      const snoozeTargetDate = new Date(Date.now() + minutes * 60 * 1000);
+      const snoozedUntilISO = snoozeTargetDate.toISOString();
+
       const updated: IDBOccurrence = {
         ...target,
         status: 'snoozed',
-        snoozedUntil: snoozeISO,
-        updatedAt: now.toISOString()
+        snoozedUntil: snoozedUntilISO,
+        updatedAt: nowISO
       };
+
       await updateOccurrenceInIDB(updated);
 
-      const sanitizedOccPayload = sanitizeOccurrenceForSupabase({
-        id: target.id,
-        reminder_id: reminderId,
-        status: 'snoozed',
-        snoozed_until: snoozeISO,
-        updated_at: now.toISOString()
-      });
+      const sanitizedOccPayload = sanitizeOccurrenceForSupabase(updated);
 
       await addToOfflineQueue({
         entity_type: 'occurrence',
-        entity_id: target.id,
-        operation: 'SNOOZE',
+        entity_id: occurrenceId,
+        operation: 'UPDATE',
         payload: sanitizedOccPayload,
         retry_count: 0,
         status: 'PENDING'
@@ -212,18 +246,18 @@ export class ReminderRepository {
   }
 
   async completeOccurrence(reminderId: string, occurrenceId: string): Promise<IDBOccurrence | null> {
-    const occurrences = await this.getLocalOccurrences();
-    const target = occurrences.find(o => o.reminderId === reminderId && (o.id === occurrenceId || occurrenceId === 'unknown'));
-
-    const nowISO = new Date().toISOString();
+    const occurrences = await getOccurrencesFromIDB();
+    const target = occurrences.find(o => o.id === occurrenceId);
 
     if (target) {
+      const nowISO = new Date().toISOString();
       const updated: IDBOccurrence = {
         ...target,
         status: 'completed',
         completedAt: nowISO,
         updatedAt: nowISO
       };
+
       await updateOccurrenceInIDB(updated);
 
       const sanitizedOccPayload = sanitizeOccurrenceForSupabase({
@@ -236,8 +270,8 @@ export class ReminderRepository {
 
       await addToOfflineQueue({
         entity_type: 'occurrence',
-        entity_id: target.id,
-        operation: 'COMPLETE',
+        entity_id: occurrenceId,
+        operation: 'UPDATE',
         payload: sanitizedOccPayload,
         retry_count: 0,
         status: 'PENDING'
@@ -250,8 +284,30 @@ export class ReminderRepository {
   }
 
   async delete(id: string): Promise<boolean> {
+    // 1. Cancel all native local alarms associated with this reminder before deleting
+    try {
+      const localOccurrences = await getOccurrencesFromIDB();
+      const targetOccurrences = localOccurrences.filter(o => o.reminderId === id);
+      for (const occ of targetOccurrences) {
+        await cancelNativeLocalAlarm(occ.id);
+      }
+
+      if (isNativePlatform()) {
+        const scheduledAlarms = await getScheduledNativeAlarms();
+        for (const alarm of scheduledAlarms) {
+          if (alarm.reminderId === id || alarm.occurrenceId && targetOccurrences.some(o => o.id === alarm.occurrenceId)) {
+            await cancelNativeLocalAlarm(alarm.occurrenceId);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[REMINDER REPOSITORY] Native alarm cancellation warning on delete:', e);
+    }
+
+    // 2. Remove reminder and associated occurrences from IDB
     await deleteReminderFromIDB(id);
 
+    // 3. Queue DELETE operation for remote Supabase sync
     await addToOfflineQueue({
       entity_type: 'reminder',
       entity_id: id,

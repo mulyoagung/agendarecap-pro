@@ -3,6 +3,39 @@
 import { useState, useEffect } from "react";
 import { useReminderStore, Frequency, ReminderItem } from "@/store/useReminderStore";
 import { getUTCISOFromLocal, formatLocalFromUTC } from "@/lib/timezone";
+
+// Format time input for consistent 24h display (auto-colon, zero-pad)
+function formatTimeInput(raw: string): string {
+  // Strip non-digits
+  const digits = raw.replace(/[^\d]/g, '');
+  if (digits.length <= 2) return digits;
+  const hh = digits.slice(0, 2);
+  const mm = digits.slice(2, 4);
+  return `${hh}:${mm}`;
+}
+
+function isValidTime24(val: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(val);
+}
+
+function padTime24(val: string): string {
+  // Try to normalize partial inputs: "8:5" -> "08:05", "830" -> "08:30"
+  const stripped = val.replace(/[^\d:]/g, '');
+  const parts = stripped.split(':');
+  if (parts.length === 2) {
+    const hh = parts[0].padStart(2, '0');
+    const mm = parts[1].padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+  // Digits only
+  const digits = stripped.replace(/:/g, '');
+  if (digits.length >= 3) {
+    const hh = digits.slice(0, digits.length - 2).padStart(2, '0');
+    const mm = digits.slice(-2).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+  return val;
+}
 import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, Edit2, RefreshCw, Zap, CheckCircle2, AlertTriangle, Send, Check, BellOff, Terminal, Play, RotateCcw, Download } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -182,15 +215,81 @@ export default function RemindersPage() {
   };
 
   const handleReactivate = async (id: string) => {
-    await reactivateReminder(id);
-    Swal.fire({
-      toast: true,
-      position: 'top-end',
-      icon: 'success',
-      title: 'Pengingat Diaktifkan Kembali!',
-      showConfirmButton: false,
-      timer: 1500
-    });
+    const target = reminders.find(r => r.id === id);
+    if (!target) return;
+
+    // Check if this is a one-time reminder with an expired schedule
+    if (target.frequency === 'once') {
+      const occ = target.currentOccurrence;
+      const scheduledMs = occ?.scheduledAt ? new Date(occ.scheduledAt).getTime() : 0;
+      const nowMs = Date.now();
+
+      if (scheduledMs <= nowMs) {
+        // Expired one-time reminder — ask user before rescheduling
+        const tomorrow = new Date(nowMs + 24 * 60 * 60 * 1000);
+        const tomorrowStr = tomorrow.toISOString().split('T')[0];
+        const displayTime = target.time || '08:00';
+
+        const result = await Swal.fire({
+          icon: 'warning',
+          title: 'Pengingat Sudah Lewat',
+          html: `<p style="margin-bottom:8px">Waktu pengingat ini sudah lewat.</p><p><b>Jadwalkan kembali besok pukul ${displayTime}?</b></p>`,
+          showCancelButton: true,
+          confirmButtonText: 'Jadwalkan Besok',
+          cancelButtonText: 'Batal',
+          confirmButtonColor: '#3B82F6',
+          cancelButtonColor: '#6B7280',
+          background: '#18181b',
+          color: '#fff'
+        });
+
+        if (!result.isConfirmed) return; // User cancelled — remain inactive
+
+        try {
+          await reactivateReminder(id, { scheduledDate: tomorrowStr });
+          Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'success',
+            title: `Pengingat dijadwalkan besok pukul ${displayTime}`,
+            showConfirmButton: false,
+            timer: 2000
+          });
+        } catch (e: any) {
+          Swal.fire({
+            icon: 'error',
+            title: 'Gagal Mengaktifkan',
+            text: e.message || 'Terjadi kesalahan.',
+            confirmButtonColor: '#ef4444',
+            background: '#18181b',
+            color: '#fff'
+          });
+        }
+        return;
+      }
+    }
+
+    // Non-expired or recurring — reactivate directly
+    try {
+      await reactivateReminder(id);
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: 'Pengingat Diaktifkan Kembali!',
+        showConfirmButton: false,
+        timer: 1500
+      });
+    } catch (e: any) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal Mengaktifkan',
+        text: e.message || 'Terjadi kesalahan.',
+        confirmButtonColor: '#ef4444',
+        background: '#18181b',
+        color: '#fff'
+      });
+    }
   };
 
   const handleAddOrUpdate = async (e: React.FormEvent) => {
@@ -473,12 +572,29 @@ export default function RemindersPage() {
                 <div>
                   <label className="block text-xs font-semibold text-zinc-400 mb-1">Waktu Jam (HH:mm)</label>
                   <input
-                    type="time"
+                    type="text"
+                    inputMode="numeric"
                     required
+                    placeholder="HH:mm"
+                    maxLength={5}
                     value={time}
-                    onChange={(e) => setTime(e.target.value)}
-                    className="w-full bg-[#121214] border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500/60 text-sm [color-scheme:dark]"
+                    onChange={(e) => {
+                      const formatted = formatTimeInput(e.target.value);
+                      setTime(formatted);
+                    }}
+                    onBlur={() => {
+                      const padded = padTime24(time);
+                      if (isValidTime24(padded)) {
+                        setTime(padded);
+                      }
+                    }}
+                    className={`w-full bg-[#121214] border rounded-xl px-4 py-2.5 text-white focus:outline-none text-sm font-mono tracking-widest ${
+                      time && !isValidTime24(time) ? 'border-red-500/60 focus:border-red-500/80' : 'border-white/10 focus:border-blue-500/60'
+                    }`}
                   />
+                  {time && !isValidTime24(time) && (
+                    <p className="text-red-400 text-[10px] mt-1">Format harus HH:mm (00:00 - 23:59)</p>
+                  )}
                 </div>
 
                 <div>
