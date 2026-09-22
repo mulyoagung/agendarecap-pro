@@ -1745,25 +1745,52 @@ Kemudian:
 
 ---
 
-# 46. CURRENT IMMEDIATE PRIORITY
+# 46. PHASE C3.1 — WEB PUSH SUBSCRIPTION INTEGRATION
 
-Prioritas terdekat bukan implementasi feature baru.
+Status:
 
-Prioritas:
+**C3.1 = PRODUCTION VERIFIED**
+
+Checkpoint Status:
+* C3.1.1 Service Worker Registration Audit: `VERIFIED`
+* C3.1.2 Status UI Clarification: `VERIFIED`
+* Physical Browser Verification: `VERIFIED`
+* Checkpoint Status: `COMMITTED + PUSHED + DEPLOYED`
+
+Summary of Verified Capabilities:
+* User-gesture Web Push activation button (`Aktifkan Notifikasi PC`) present and functioning on `/settings/notifications`.
+* Web Push state detection handling 6 states (`NOT_SUPPORTED`, `PERMISSION_DEFAULT`, `PERMISSION_DENIED`, `NOT_SUBSCRIBED`, `SUBSCRIBED`, `SUBSCRIPTION_ERROR`).
+* Service Worker (`public/sw.js` v5) registered with full PushManager subscription flow via `NEXT_PUBLIC_VAPID_PUBLIC_KEY`.
+* Persistence to Supabase `push_subscribers` via `POST /api/push/subscribe` with multi-device isolation.
+* Test Push capability via `/api/push/send-test` functioning while tab is open or closed.
+* Zero changes to Android Native OS AlarmEngine or C1.5 / C2 / C2.1 canonical architecture.
+
+---
+
+# 48. PHASE C3.1.2 — WEB PUSH STATUS UI CLARIFICATION
+
+Status:
+
+**C3.1.2 = VERIFIED**
+
+Summary of Disambiguation & Verification:
+* Separated Service Worker registration state (`Active`, `Inactive`, `Disabled in development`, `Unavailable`) from Web Push Subscription status (`TERDAFTAR` vs `BELUM TERDAFTAR`).
+* Replaced blocking `await navigator.serviceWorker.ready` in diagnostic checks with non-blocking `navigator.serviceWorker.getRegistration()`.
+* Absence of `PushSubscription` no longer misreports `Service Worker: Inactive`.
+* Physical browser verification passed cleanly on `/settings/notifications`.
+* Preserved `public/sw.js`, `ServiceWorkerRegistration.tsx`, Android code, API endpoints, and database schemas completely untouched.
+
+---
+
+# 49. CURRENT IMMEDIATE PRIORITY
+
+Prioritas terdekat:
 
 ```text
-1. Install fresh C2.1 APK
-2. Verify offline reminder firing
-3. Verify offline DELETE cancels native alarm
-4. Verify online DELETE
-5. Verify Reactivate expired reminder
-6. Verify 24h input
-7. Verify native Agenda duplicate is gone
-8. Review result
-9. Only then finalize C2/C2.1 Git state
+1. Phase C3.2 — Vercel Cron & Production Push Scheduler Integration
+2. Configure vercel.json cron frequency & endpoint security (CRON_SECRET)
+3. End-to-end production Push notification smoke testing
 ```
-
-Setelah C2.1 benar-benar stabil, baru lanjut ke feature roadmap berikutnya.
 
 ---
 

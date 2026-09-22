@@ -30,6 +30,7 @@ export default function NotificationSettingsPage() {
   const [webPushStatus, setWebPushStatus] = useState<string>("INACTIVE");
 
   const [swActive, setSwActive] = useState<boolean>(false);
+  const [swActiveLabel, setSwActiveLabel] = useState<string>("Inactive");
   const [swScope, setSwScope] = useState<string>("");
   const [subscriptionActive, setSubscriptionActive] = useState<boolean>(false);
   const [endpointSnippet, setEndpointSnippet] = useState<string>("");
@@ -57,6 +58,10 @@ export default function NotificationSettingsPage() {
   const [customSoundName, setCustomSoundName] = useState<string>("");
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const webAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Web Push State for PC/Web
+  const [webPushState, setWebPushState] = useState<'NOT_SUPPORTED' | 'PERMISSION_DEFAULT' | 'PERMISSION_DENIED' | 'NOT_SUBSCRIBED' | 'SUBSCRIBED' | 'SUBSCRIPTION_ERROR'>('NOT_SUBSCRIBED');
+  const [isSubscribingWebPush, setIsSubscribingWebPush] = useState<boolean>(false);
 
   useEffect(() => {
     const savedSound = localStorage.getItem('agendarecap_default_sound') || 'default';
@@ -94,33 +99,69 @@ export default function NotificationSettingsPage() {
       setNativeAlarmStatus('INACTIVE (Web/PWA Mode)');
     }
 
-    // 2. Service Worker & Push Check (All platforms)
-    if ('serviceWorker' in navigator) {
-      try {
-        const reg = await navigator.serviceWorker.ready;
-        setSwActive(true);
-        setSwScope(reg.scope);
-
-        const sub = await reg.pushManager.getSubscription();
-        if (sub) {
-          setSubscriptionActive(true);
-          setWebPushStatus("ACTIVE");
-          setEndpointSnippet(sub.endpoint.substring(0, 40) + '...');
-        } else {
-          setSubscriptionActive(false);
-          setWebPushStatus(isNativePlatform() ? "NATIVE ALARM ENGINE" : "INACTIVE");
-          setEndpointSnippet("");
-        }
-      } catch (err) {
-        setSwActive(isNativePlatform());
-        setSwScope(isNativePlatform() ? 'Native OS Android Bridge' : '');
+    // 2. Service Worker & Web Push Subscription State Check (Disambiguated C3.1.2)
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+      if (process.env.NODE_ENV === 'development') {
+        setSwActive(false);
+        setSwActiveLabel("Disabled in development");
+        setSwScope("Disabled in dev mode");
+        setWebPushState('NOT_SUBSCRIBED');
+        setWebPushStatus('NOT SUBSCRIBED');
         setSubscriptionActive(false);
-        setWebPushStatus(isNativePlatform() ? "NATIVE ALARM ENGINE" : "INACTIVE");
+      } else {
+        try {
+          // Use non-blocking getRegistration() to read actual Service Worker state
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg && (reg.active || reg.installing || reg.waiting)) {
+            setSwActive(true);
+            setSwActiveLabel("Active");
+            setSwScope(reg.scope || '/');
+
+            // Determine Web Push Subscription state independently
+            const sub = await reg.pushManager.getSubscription();
+            if (sub) {
+              setSubscriptionActive(true);
+              setWebPushState('SUBSCRIBED');
+              setWebPushStatus("ACTIVE");
+              setEndpointSnippet(sub.endpoint.substring(0, 40) + '...');
+            } else {
+              setSubscriptionActive(false);
+              setEndpointSnippet("");
+              if (Notification.permission === 'denied') {
+                setWebPushState('PERMISSION_DENIED');
+                setWebPushStatus('PERMISSION DENIED');
+              } else if (Notification.permission === 'default') {
+                setWebPushState('PERMISSION_DEFAULT');
+                setWebPushStatus('NOT ACTIVATED');
+              } else {
+                setWebPushState('NOT_SUBSCRIBED');
+                setWebPushStatus("NOT SUBSCRIBED");
+              }
+            }
+          } else {
+            setSwActive(false);
+            setSwActiveLabel(isNativePlatform() ? "Native Android OS Bridge" : "Inactive");
+            setSwScope(isNativePlatform() ? 'Native OS Android Bridge' : 'None');
+            setSubscriptionActive(false);
+            setWebPushState('NOT_SUBSCRIBED');
+            setWebPushStatus("NOT SUBSCRIBED");
+          }
+        } catch (err) {
+          console.warn('Web Push status check error:', err);
+          setSwActive(isNativePlatform());
+          setSwActiveLabel(isNativePlatform() ? "Native Android OS Bridge" : "Inactive");
+          setWebPushState('SUBSCRIPTION_ERROR');
+          setWebPushStatus('ERROR');
+          setSubscriptionActive(false);
+        }
       }
-    } else if (isNativePlatform()) {
-      setSwActive(true);
-      setSwScope('Native OS Android Bridge');
-      setWebPushStatus('NATIVE ALARM ENGINE');
+    } else {
+      setSwActive(isNativePlatform());
+      setSwActiveLabel(isNativePlatform() ? "Native Android OS Bridge" : "Unavailable");
+      setSwScope(isNativePlatform() ? 'Native OS Android Bridge' : 'None');
+      setWebPushState('NOT_SUPPORTED');
+      setWebPushStatus('NOT SUPPORTED');
+      setSubscriptionActive(false);
     }
 
     // 3. IndexedDB Stats & Supabase check
@@ -364,6 +405,142 @@ export default function NotificationSettingsPage() {
       text: 'Semua test alarm aktif berhasil dibatalkan.'
     });
     await runDiagnosticCheck();
+  };
+
+  const handleActivateWebPush = async () => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Browser Tidak Mendukung Web Push',
+        text: 'Browser Anda tidak mendukung Web Push Notification.'
+      });
+      return;
+    }
+
+    setIsSubscribingWebPush(true);
+    try {
+      // 1. Explicit User Gesture: Request Browser Permission
+      const permissionResult = await Notification.requestPermission();
+      setNotificationPermission(permissionResult);
+
+      if (permissionResult !== 'granted') {
+        setWebPushState('PERMISSION_DENIED');
+        setWebPushStatus('PERMISSION DENIED');
+        Swal.fire({
+          icon: 'warning',
+          title: 'Izin Notifikasi Ditolak',
+          text: 'Anda menolak izin notifikasi browser. Silakan izinkan pada ikon gembok / setelan situs browser.'
+        });
+        setIsSubscribingWebPush(false);
+        return;
+      }
+
+      // 2. Ensure Service Worker Ready
+      const reg = await navigator.serviceWorker.ready;
+
+      // 3. Obtain VAPID Public Key
+      const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+      if (!vapidPublicKey) {
+        setWebPushState('SUBSCRIPTION_ERROR');
+        Swal.fire({
+          icon: 'error',
+          title: 'VAPID Key Belum Diatur',
+          text: 'Variabel NEXT_PUBLIC_VAPID_PUBLIC_KEY tidak ditemukan.'
+        });
+        setIsSubscribingWebPush(false);
+        return;
+      }
+
+      const urlBase64ToUint8Array = (base64String: string) => {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+          outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+      };
+
+      // 4. Subscribe via PushManager
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+        });
+      }
+
+      // 5. POST to /api/push/subscribe (upsert endpoint into push_subscribers)
+      const res = await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscription: sub,
+          deviceInfo: {
+            userAgent: navigator.userAgent,
+            platform: navigator.platform
+          }
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSubscriptionActive(true);
+        setWebPushState('SUBSCRIBED');
+        setWebPushStatus('ACTIVE');
+        setEndpointSnippet(sub.endpoint.substring(0, 40) + '...');
+        Swal.fire({
+          icon: 'success',
+          title: 'Notifikasi PC Berhasil Diaktifkan!',
+          text: 'Perangkat browser ini telah terdaftar untuk menerima pengingat via Web Push.'
+        });
+      } else {
+        throw new Error(data.error || 'Gagal menyinkronkan langganan ke server');
+      }
+    } catch (err: any) {
+      console.error('Web Push Activation Error:', err);
+      setWebPushState('SUBSCRIPTION_ERROR');
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal Mengaktifkan Web Push',
+        text: err.message || 'Terjadi kesalahan saat pendaftaran push notification.'
+      });
+    } finally {
+      setIsSubscribingWebPush(false);
+    }
+  };
+
+  const handleDeactivateWebPush = async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+
+      if (sub) {
+        await fetch('/api/push/subscribe', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: sub.endpoint })
+        });
+        await sub.unsubscribe();
+      }
+
+      setSubscriptionActive(false);
+      setWebPushState('NOT_SUBSCRIBED');
+      setWebPushStatus('NOT SUBSCRIBED');
+      setEndpointSnippet('');
+      Swal.fire({
+        icon: 'info',
+        title: 'Notifikasi PC Dinonaktifkan',
+        text: 'Perangkat browser ini telah dihapus dari langganan Web Push.'
+      });
+    } catch (err: any) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal Menghapus Langganan',
+        text: err.message
+      });
+    }
   };
 
   const handleTestPush = async () => {
@@ -797,6 +974,80 @@ export default function NotificationSettingsPage() {
             >
               <Save className="w-4 h-4" /> SIMPAN SUARA DEFAULT PENGINGAT
             </button>
+          </div>
+        </div>
+
+        {/* Web Push Subscription Management (PC/Web) */}
+        <div className="glass p-6 rounded-[2rem] border border-emerald-500/30 bg-emerald-500/5 flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+            <div>
+              <h2 className="text-sm font-bold text-emerald-300 uppercase tracking-wider flex items-center gap-2">
+                <Send className="w-5 h-5 text-emerald-400" /> Notifikasi PC / Web Push (Browser Desktop)
+              </h2>
+              <p className="text-xs text-zinc-400 mt-1">
+                Aktifkan Web Push agar pengingat muncul sebagai notifikasi OS/Browser meskipun tab AgendaRecap sedang tidak dibuka.
+              </p>
+            </div>
+
+            <span className={`px-3 py-1 rounded-full text-xs font-black self-start sm:self-auto border ${
+              webPushState === 'SUBSCRIBED' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+              webPushState === 'PERMISSION_DENIED' ? 'bg-red-500/20 text-red-300 border-red-500/40' :
+              webPushState === 'NOT_SUPPORTED' ? 'bg-zinc-800 text-zinc-400 border-zinc-700' :
+              webPushState === 'SUBSCRIPTION_ERROR' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
+              'bg-blue-500/20 text-blue-300 border-blue-500/40'
+            }`}>
+              {webPushState === 'SUBSCRIBED' ? '✓ TERDAFTAR (ACTIVE)' :
+               webPushState === 'PERMISSION_DENIED' ? '✕ IZIN DITOLAK' :
+               webPushState === 'PERMISSION_DEFAULT' ? 'BELUM DIAKTIFKAN' :
+               webPushState === 'NOT_SUPPORTED' ? 'TIDAK DIDUKUNG' :
+               webPushState === 'SUBSCRIPTION_ERROR' ? 'ERROR LANGGANAN' :
+               'BELUM TERDAFTAR'}
+            </span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="text-xs space-y-1 text-zinc-300">
+              <p>Status Service Worker: <strong className="text-white font-mono">{swActiveLabel}</strong></p>
+              {endpointSnippet && (
+                <p className="text-zinc-400 text-[11px] truncate max-w-xs sm:max-w-md">
+                  Endpoint: <span className="font-mono text-emerald-400">{endpointSnippet}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+              {webPushState !== 'SUBSCRIBED' ? (
+                <button
+                  type="button"
+                  onClick={handleActivateWebPush}
+                  disabled={isSubscribingWebPush || webPushState === 'NOT_SUPPORTED'}
+                  className="px-5 py-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-black font-extrabold text-xs rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+                >
+                  <Send className={`w-4 h-4 ${isSubscribingWebPush ? 'animate-spin' : ''}`} />
+                  {isSubscribingWebPush ? 'MENGHUBUNGKAN...' : 'AKTIFKAN NOTIFIKASI PC'}
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleTestPush}
+                    disabled={isTestingPush}
+                    className="px-4 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shrink-0"
+                  >
+                    <Send className={`w-4 h-4 ${isTestingPush ? 'animate-bounce' : ''}`} />
+                    UJI NOTIFIKASI PC
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDeactivateWebPush}
+                    className="px-4 py-3 bg-white/10 hover:bg-white/20 text-zinc-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shrink-0 border border-white/10"
+                  >
+                    <XCircle className="w-4 h-4 text-red-400" /> NONAKTIFKAN
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
