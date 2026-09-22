@@ -1123,7 +1123,7 @@ Physical device verification:
 
 Status:
 
-**DEVICE VERIFIED — PRODUCTION DEPLOYMENT PENDING**
+**PRODUCTION VERIFIED — C2.1 COMPLETE**
 
 Implemented & Verified:
 
@@ -1132,7 +1132,8 @@ Implemented & Verified:
 * expired one-time Reactivate UX,
 * C2.1-FIX: Reactivate scheduled date editing & occurrence reconciliation fix,
 * native Agenda duplicate audit,
-* fresh native APK build (~6.29 MB).
+* fresh native APK build (~6.29 MB, commit `bd8f160`),
+* production Vercel deployment & verification (`https://agendarecap.vercel.app`).
 
 Current APK build:
 
@@ -1140,9 +1141,9 @@ Current APK build:
 ~6.29 MB (6,593,418 bytes)
 ```
 
-Physical device installation:
+Physical device installation & Production status:
 
-**VERIFIED ON PHYSICAL DEVICE**
+**VERIFIED ON PHYSICAL DEVICE & PRODUCTION DEPLOYED**
 
 ---
 
