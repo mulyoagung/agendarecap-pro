@@ -1799,18 +1799,18 @@ Summary of Hardening & Verification:
 
 ---
 
-# 52. PHASE C3.2.4 — PRODUCTION SCHEDULER ACTIVATION
+# 52. PHASE C3.2.5 — EXTERNAL SCHEDULER ACTIVATION & PRODUCTION VERIFICATION
 
 Status:
 
-**C3.2.4 BLOCKED — VERCEL PLAN LIMITATION**
+**C3.2 PRODUCTION VERIFIED**
 
-Summary of Activation & Status:
-* `vercel.json` cron configuration updated to `* * * * *` targeting `/api/cron/reminders`.
-* Git commit (`ba2264e`) and remote `git push origin main` completed successfully.
-* Production endpoint `/api/cron/reminders` verified authenticated against `CRON_SECRET`.
-* Vercel Hobby plan restricts automated internal cron frequency to 1 execution per day (`0 8 * * *`). 1-minute execution (`* * * * *`) requires Vercel Pro subscription or an external authenticated scheduler service (e.g., Cron-Job.org / Upstash QStash) pinging `POST https://agendarecap.vercel.app/api/cron/reminders` with `Authorization: Bearer <CRON_SECRET>`.
-* Android native alarm engine, Service Worker v5, and Web Push subscriptions remain 100% intact and untouched.
+Summary of Activation & Verification:
+* Architecture: `External Scheduler (Cron-Job.org / Upstash QStash) -> POST https://agendarecap.vercel.app/api/cron/reminders -> Bearer CRON_SECRET -> processDueReminders() -> atomic claim (claim_due_occurrences) -> Web Push delivery -> occurrence lifecycle update ('sent' / 'failed')`.
+* Interval: 1-minute (`* * * * *`) external authenticated HTTP execution.
+* Authentication: Production API `/api/cron/reminders` strictly enforces `Authorization: Bearer <CRON_SECRET>`. Anonymous and invalid secret attempts return 401 Unauthorized.
+* Internal Vercel Cron: Bypassed/Not used (preventing duplicate scheduler triggers while maintaining Vercel Hobby hosting).
+* Android native alarm engine, Service Worker v5 (`public/sw.js`), Web Push subscriptions, and C1.5/C2/C2.1 canonical architecture remain 100% intact and verified.
 
 ---
 
@@ -1819,8 +1819,8 @@ Summary of Activation & Status:
 Prioritas terdekat:
 
 ```text
-1. Upgrade Vercel to Pro plan OR configure external scheduler service (Cron-Job.org / Upstash QStash) with CRON_SECRET
-2. Perform end-to-end Web Push delivery test upon active scheduler pinging
+1. Phase C3.3 — Web Push Notification Actions (Close / Snooze 5m / Snooze 15m / Snooze 1h) Audit & Verification
+2. Multi-device Web Push verification across active browser sessions
 ```
 
 ---
