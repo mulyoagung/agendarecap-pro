@@ -1799,14 +1799,28 @@ Summary of Hardening & Verification:
 
 ---
 
-# 51. CURRENT IMMEDIATE PRIORITY
+# 52. PHASE C3.2.4 — PRODUCTION SCHEDULER ACTIVATION
+
+Status:
+
+**C3.2.4 BLOCKED — VERCEL PLAN LIMITATION**
+
+Summary of Activation & Status:
+* `vercel.json` cron configuration updated to `* * * * *` targeting `/api/cron/reminders`.
+* Git commit (`ba2264e`) and remote `git push origin main` completed successfully.
+* Production endpoint `/api/cron/reminders` verified authenticated against `CRON_SECRET`.
+* Vercel Hobby plan restricts automated internal cron frequency to 1 execution per day (`0 8 * * *`). 1-minute execution (`* * * * *`) requires Vercel Pro subscription or an external authenticated scheduler service (e.g., Cron-Job.org / Upstash QStash) pinging `POST https://agendarecap.vercel.app/api/cron/reminders` with `Authorization: Bearer <CRON_SECRET>`.
+* Android native alarm engine, Service Worker v5, and Web Push subscriptions remain 100% intact and untouched.
+
+---
+
+# 53. CURRENT IMMEDIATE PRIORITY
 
 Prioritas terdekat:
 
 ```text
-1. Phase C3.2.4 — Production Scheduler Activation & Deployment
-2. Configure vercel.json cron frequency to 1 minute (* * * * *) upon decision
-3. End-to-end production Push notification smoke testing
+1. Upgrade Vercel to Pro plan OR configure external scheduler service (Cron-Job.org / Upstash QStash) with CRON_SECRET
+2. Perform end-to-end Web Push delivery test upon active scheduler pinging
 ```
 
 ---
