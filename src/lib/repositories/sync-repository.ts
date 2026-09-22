@@ -184,7 +184,12 @@ export class SyncRepository {
         console.log(`[SYNC ENGINE] Authenticated user active: ${user.id}`);
         await repairOrphanDataAndQueueInIDB(user.id);
       } else {
-        console.warn('[SYNC ENGINE] No active authenticated user session. Mutations will remain local-first.');
+        console.warn('[SYNC ENGINE] No active authenticated user session. Pausing mutation queue processing until authenticated.');
+        return {
+          success: false,
+          syncedCount: 0,
+          errors: ['No authenticated user session']
+        };
       }
 
       // 1. Process Offline Queue Mutations via Direct Supabase SDK
@@ -234,9 +239,27 @@ export class SyncRepository {
                 .eq('id', item.entity_id)
                 .select();
               queryError = error;
-              success = !error;
-              if (!error) {
-                console.log(`[SYNC] Agenda DELETE completed: ${data?.length || 0} row(s) deleted in Supabase for ID ${item.entity_id}`);
+              const deletedCount = data ? data.length : 0;
+
+              if (error) {
+                success = false;
+              } else if (deletedCount > 0) {
+                success = true;
+                console.log(`[SYNC] Agenda DELETE completed: ${deletedCount} row(s) deleted in Supabase for ID ${item.entity_id}`);
+              } else {
+                const { data: existingRow, error: checkErr } = await supabase
+                  .from('agendas')
+                  .select('id')
+                  .eq('id', item.entity_id)
+                  .maybeSingle();
+
+                if (!checkErr && !existingRow) {
+                  success = true;
+                  console.log(`[SYNC] Agenda DELETE verified idempotently complete: row ${item.entity_id} does not exist on Supabase server.`);
+                } else {
+                  success = false;
+                  queryError = checkErr || { code: 'RLS_OR_ZERO_ROWS', message: `0 rows affected during DELETE for agenda ${item.entity_id}` };
+                }
               }
             }
           } else if (item.entity_type === 'reminder') {
@@ -277,8 +300,10 @@ export class SyncRepository {
                 .eq('id', item.entity_id)
                 .select();
               queryError = error;
-              success = !error;
+              const deletedCount = data ? data.length : 0;
+
               if (error) {
+                success = false;
                 console.error('[SYNC] Reminder DELETE failed with Supabase error:', {
                   reminderId: item.entity_id,
                   mutationId: rawItem.id,
@@ -288,12 +313,23 @@ export class SyncRepository {
                   errorDetails: error.details,
                   authenticatedUser: user?.id || 'UNAUTHENTICATED'
                 });
+              } else if (deletedCount > 0) {
+                success = true;
+                console.log(`[SYNC] Reminder DELETE succeeded: deleted ${deletedCount} row(s) in Supabase for ID ${item.entity_id}`);
               } else {
-                const deletedCount = data ? data.length : 0;
-                if (deletedCount === 0) {
-                  console.warn(`[SYNC] Reminder DELETE completed with 0 rows affected in Supabase for ID ${item.entity_id}. (Row may already be deleted or RLS user_id mismatch). User: ${user?.id || 'UNAUTHENTICATED'}`);
+                const { data: existingRow, error: checkErr } = await supabase
+                  .from('reminders')
+                  .select('id')
+                  .eq('id', item.entity_id)
+                  .maybeSingle();
+
+                if (!checkErr && !existingRow) {
+                  success = true;
+                  console.log(`[SYNC] Reminder DELETE verified idempotently complete: row ${item.entity_id} does not exist on Supabase server.`);
                 } else {
-                  console.log(`[SYNC] Reminder DELETE succeeded: deleted ${deletedCount} row(s) in Supabase for ID ${item.entity_id}`);
+                  success = false;
+                  queryError = checkErr || { code: 'RLS_OR_ZERO_ROWS', message: `0 rows affected during DELETE for reminder ${item.entity_id}` };
+                  console.warn(`[SYNC] Reminder DELETE returned 0 rows affected, but row still exists or RLS restricted for ID ${item.entity_id}. Retaining queue item for retry.`);
                 }
               }
             }
@@ -462,10 +498,13 @@ export class SyncRepository {
         }
 
         if (remoteReminders && Array.isArray(remoteReminders)) {
+          // Re-query current queue state to ensure accurately reflected pending DELETE items
+          const currentQueue = await getOfflineQueue();
+
           // Collect IDs of reminders that are pending/retryable DELETE locally.
           // These must be skipped during reconciliation or they get re-inserted from server.
           const pendingDeleteReminderIds = new Set(
-            rawQueue
+            currentQueue
               .filter(i =>
                 i.entity_type === 'reminder' &&
                 i.operation === 'DELETE' &&
@@ -475,7 +514,7 @@ export class SyncRepository {
           );
 
           const pendingMutationReminderIds = new Set(
-            rawQueue
+            currentQueue
               .filter(i => i.entity_type === 'reminder')
               .map(i => i.entity_id)
           );
