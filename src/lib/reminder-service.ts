@@ -86,87 +86,47 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
 
   addLog(`Active device push subscriptions in database: ${subscribers.length}`);
 
-  // 2. Atomic Claim Lock Query for Due Occurrences
+  // 1.5 Stale 'processing' Recovery: Reset occurrences stuck in 'processing' for > 10 minutes back to 'scheduled'
+  const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+  try {
+    const { data: recoveredData, error: recoverErr } = await adminSupabase
+      .from('reminder_occurrences')
+      .update({ status: 'scheduled', updated_at: nowISO })
+      .eq('status', 'processing')
+      .lte('updated_at', tenMinutesAgo)
+      .select('id');
+
+    if (!recoverErr && recoveredData && recoveredData.length > 0) {
+      addLog(`[RECOVERY] Successfully recovered ${recoveredData.length} stale 'processing' occurrence(s) back to 'scheduled' state`);
+    }
+  } catch (recErr: any) {
+    addLog(`Stale processing recovery warning: ${recErr.message}`);
+  }
+
+  // 2. Authoritative Atomic Claim Lock Query for Due Occurrences
   let dueOccurrences: any[] = [];
 
-  // Try stored procedure `claim_due_occurrences` first
+  // Use stored procedure `claim_due_occurrences` as authoritative atomic claim
   try {
     const { data: claimedData, error: rpcErr } = await adminSupabase.rpc('claim_due_occurrences', {
       target_now: nowISO,
       fetch_limit: 50
     });
 
-    if (!rpcErr && claimedData) {
+    if (!rpcErr && claimedData && Array.isArray(claimedData)) {
       dueOccurrences = claimedData;
+      if (dueOccurrences.length > 0) {
+        addLog(`RPC claim_due_occurrences authoritative claim returned ${dueOccurrences.length} occurrence(s)`);
+      }
+    } else if (rpcErr) {
+      addLog(`RPC claim_due_occurrences notice: ${rpcErr.message} (code=${rpcErr.code})`);
     }
   } catch (e: any) {
-    addLog(`RPC claim_due_occurrences fallback notice: ${e.message}`);
+    addLog(`RPC claim_due_occurrences error: ${e.message}`);
   }
 
-  // Direct table query fallback if RPC is not deployed yet
-  if (dueOccurrences.length === 0) {
-    try {
-      const { data: rawOccurrences } = await adminSupabase
-        .from('reminder_occurrences')
-        .select('*')
-        .in('status', ['scheduled', 'snoozed'])
-        .or(`and(status.eq.scheduled,scheduled_at.lte.${nowISO}),and(status.eq.snoozed,snoozed_until.lte.${nowISO})`);
-
-      if (rawOccurrences && rawOccurrences.length > 0) {
-        const occIds = rawOccurrences.map(o => o.id);
-        // Lock occurrences atomically by setting status = 'processing'
-        await adminSupabase
-          .from('reminder_occurrences')
-          .update({ status: 'processing', updated_at: nowISO })
-          .in('id', occIds);
-
-        dueOccurrences = rawOccurrences;
-      }
-    } catch (e: any) {
-      addLog(`Direct occurrences table query notice: ${e.message}`);
-    }
-  }
-
-  // Legacy `reminders` table fallback for backward compatibility
-  if (dueOccurrences.length === 0) {
-    try {
-      const { data: rawReminders } = await adminSupabase
-        .from('reminders')
-        .select('*')
-        .in('status', ['scheduled', 'snoozed'])
-        .lte('scheduled_at', nowISO)
-        .eq('is_active', true);
-
-      if (rawReminders && rawReminders.length > 0) {
-        for (const r of rawReminders) {
-          const occId = crypto.randomUUID();
-          dueOccurrences.push({
-            id: occId,
-            reminder_id: r.id,
-            user_id: r.user_id,
-            scheduled_at: r.scheduled_at || nowISO,
-            status: 'processing',
-            notification_tag: `reminder-${r.id}-occurrence-${occId}`,
-            // Attach reminder parent definition details
-            title: r.title,
-            body: r.body,
-            time: r.time,
-            frequency: r.frequency,
-            timezone: r.timezone
-          });
-        }
-
-        // Lock legacy reminders
-        const rIds = rawReminders.map(r => r.id);
-        await adminSupabase
-          .from('reminders')
-          .update({ status: 'processing', updated_at: nowISO })
-          .in('id', rIds);
-      }
-    } catch (e: any) {
-      addLog(`Legacy reminders fallback notice: ${e.message}`);
-    }
-  }
+  // Non-atomic direct SELECT -> UPDATE fallback is removed in production to eliminate concurrency race conditions.
+  // Fail-safe: if RPC returns 0 rows or is unready, no un-claimed rows are processed.
 
   const foundCount = dueOccurrences.length;
   addLog(`Found ${foundCount} due occurrences ready for push delivery`);

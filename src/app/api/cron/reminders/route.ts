@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { processDueReminders } from '@/lib/reminder-service';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   return handleCronJob(request);
@@ -11,25 +11,31 @@ export async function POST(request: Request) {
   return handleCronJob(request);
 }
 
-async function handleCronJob(request: Request) {
-  const url = new URL(request.url);
-  const isManualRequest = url.searchParams.get('manual') === 'true' || url.searchParams.get('trigger') === 'test';
-  
-  const authHeader = request.headers.get('authorization');
-  const cronSecretHeader = request.headers.get('x-cron-secret');
-  const querySecret = url.searchParams.get('secret');
+export async function handleCronJob(request: Request) {
   const expectedSecret = process.env.CRON_SECRET;
+  const isDev = process.env.NODE_ENV === 'development';
 
-  // If secret is set, verify header or query secret UNLESS explicitly triggered manually from application UI
-  if (expectedSecret && !isManualRequest) {
+  // Production authentication enforcement
+  if (expectedSecret) {
+    const url = new URL(request.url);
+    const authHeader = request.headers.get('authorization');
+    const cronSecretHeader = request.headers.get('x-cron-secret');
+    const querySecret = url.searchParams.get('secret');
+
     const isBearerValid = authHeader === `Bearer ${expectedSecret}`;
     const isCustomHeaderValid = cronSecretHeader === expectedSecret;
     const isQuerySecretValid = querySecret === expectedSecret;
 
     if (!isBearerValid && !isCustomHeaderValid && !isQuerySecretValid) {
       console.warn('[CRON API] Unauthorized cron request attempt');
-      return NextResponse.json({ error: 'Unauthorized cron request', hint: 'Pass ?manual=true or valid authorization header' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+  } else if (!isDev) {
+    console.error('[CRON API] CRON_SECRET environment variable is missing in production environment');
+    return NextResponse.json(
+      { error: 'Server authentication configuration missing' },
+      { status: 500 }
+    );
   }
 
   // Process Due Reminders Engine
@@ -38,6 +44,6 @@ async function handleCronJob(request: Request) {
     return NextResponse.json(result, { status: result.success ? 200 : 500 });
   } catch (err: any) {
     console.error('[CRON API] Fatal error executing reminder engine:', err);
-    return NextResponse.json({ error: err.message, success: false }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error executing scheduler', success: false }, { status: 500 });
   }
 }

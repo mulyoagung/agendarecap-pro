@@ -1782,13 +1782,29 @@ Summary of Disambiguation & Verification:
 
 ---
 
-# 49. CURRENT IMMEDIATE PRIORITY
+# 50. PHASE C3.2.2 — SCHEDULER ENGINE HARDENING
+
+Status:
+
+**C3.2.2 IMPLEMENTED — VERIFICATION PENDING**
+
+Summary of Hardening:
+* Atomic claim (`claim_due_occurrences` RPC) made authoritative; non-atomic direct SELECT -> UPDATE fallback removed from scheduler execution path to prevent concurrency races.
+* Stale `processing` recovery implemented: occurrences stuck in `processing` state for > 10 minutes are automatically reset to `scheduled` using `updated_at` timestamp.
+* Cron API security hardened on `/api/cron/reminders` and `/api/push/cron`: `CRON_SECRET` authentication enforced (supporting Bearer, `x-cron-secret` header, or `secret` query param). Manual bypasses (`?manual=true`, `?trigger=test`) removed from production handlers.
+* Dynamic route configuration updated from `export const dynamic = 'force-static'` to `export const dynamic = 'force-dynamic'` on both cron routes.
+* Vercel Cron schedule (`vercel.json`) remains unchanged (`0 8 * * *`) pending activation phase.
+* Zero changes to Android native alarm engine, Service Worker v5, Web Push subscriptions, or C1.5/C2/C2.1 canonical architecture.
+
+---
+
+# 51. CURRENT IMMEDIATE PRIORITY
 
 Prioritas terdekat:
 
 ```text
-1. Phase C3.2 — Vercel Cron & Production Push Scheduler Integration
-2. Configure vercel.json cron frequency & endpoint security (CRON_SECRET)
+1. Phase C3.2.3 — End-to-end Scheduler Verification
+2. Configure vercel.json cron frequency to 1 minute (* * * * *) upon decision
 3. End-to-end production Push notification smoke testing
 ```
 
