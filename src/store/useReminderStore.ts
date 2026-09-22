@@ -53,7 +53,7 @@ interface ReminderStoreState {
     frequency?: Frequency;
     sound?: string;
     daysOfWeek?: number[];
-  }) => Promise<void>;
+  }) => Promise<boolean>;
   reactivateReminder: (id: string, options?: { scheduledDate?: string; scheduledAt?: string }) => Promise<void>;
   snoozeOccurrence: (reminderId: string, occurrenceId: string, minutes: number) => Promise<void>;
   completeOccurrence: (reminderId: string, occurrenceId: string) => Promise<void>;
@@ -155,15 +155,41 @@ export const useReminderStore = create<ReminderStoreState>()(
       },
 
       updateReminder: async (id, input) => {
-        // 1. Local-first Repository Update
-        await reminderRepository.update(id, input);
+        try {
+          // 1. Local-first Repository Update (returns updated reminder + occurrence, throws if past time)
+          const result = await reminderRepository.update(id, input);
+          if (!result) return false;
 
-        // 2. Update UI State
-        await get().fetchReminders();
+          // 2. Schedule Native Alarm if on Android and occurrence was updated/reconciled
+          if (isNativePlatform() && result.occurrence) {
+            scheduleNativeLocalAlarm({
+              reminderId: result.reminder.id,
+              occurrenceId: result.occurrence.id,
+              title: result.reminder.title,
+              body: result.reminder.body || '',
+              sound: result.reminder.sound || 'default',
+              scheduledAt: result.occurrence.scheduledAt
+            });
+          }
 
-        // 3. Trigger background sync
-        if (typeof navigator !== 'undefined' && navigator.onLine) {
-          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
+          // 3. Update UI State
+          await get().fetchReminders();
+
+          // 4. Trigger background sync
+          if (typeof navigator !== 'undefined' && navigator.onLine) {
+            syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
+          }
+
+          return true;
+        } catch (e: any) {
+          const { default: Swal } = await import('sweetalert2');
+          Swal.fire({
+            icon: 'warning',
+            title: 'Waktu Tidak Valid',
+            text: e?.message || 'Gagal memperbarui pengingat.',
+            confirmButtonText: 'Oke'
+          });
+          return false;
         }
       },
 

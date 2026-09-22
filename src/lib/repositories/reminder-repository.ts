@@ -151,13 +151,92 @@ export class ReminderRepository {
     return { reminder, occurrence };
   }
 
-  async update(id: string, updates: Partial<IDBReminder> & { scheduledDate?: string }): Promise<IDBReminder | null> {
+  async update(id: string, updates: Partial<IDBReminder> & { scheduledDate?: string }): Promise<{ reminder: IDBReminder; occurrence?: IDBOccurrence } | null> {
     const reminders = await getRemindersFromIDB();
     const existing = reminders.find(r => r.id === id);
     if (!existing) return null;
 
-    const nowISO = new Date().toISOString();
+    const now = new Date();
+    const nowISO = now.toISOString();
+    const userTimezone = updates.timezone || existing.timezone || "Asia/Jakarta";
+    const targetFrequency = updates.frequency || existing.frequency || "once";
+    const targetTime = updates.time || existing.time;
 
+    const occurrences = await getOccurrencesFromIDB();
+    const targetOccurrences = occurrences.filter(o => o.reminderId === id);
+    const activeOcc = targetOccurrences.find(o => o.status === 'scheduled' || o.status === 'snoozed' || o.status === 'processing') || targetOccurrences[targetOccurrences.length - 1];
+
+    let updatedOccurrence: IDBOccurrence | undefined;
+
+    if (updates.scheduledDate || updates.time || updates.timezone || updates.frequency || updates.isActive !== undefined) {
+      let targetDateStr = updates.scheduledDate;
+      if (!targetDateStr && activeOcc?.scheduledAt) {
+        try {
+          targetDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: userTimezone }).format(new Date(activeOcc.scheduledAt));
+        } catch (_) {}
+      }
+      if (!targetDateStr) {
+        targetDateStr = now.toISOString().split("T")[0];
+      }
+
+      let scheduledAtISO = getUTCISOFromLocal(targetDateStr, targetTime, userTimezone);
+      const scheduledMs = new Date(scheduledAtISO).getTime();
+      const nowMs = now.getTime();
+
+      if (targetFrequency === 'once') {
+        if (scheduledMs <= nowMs) {
+          throw new Error('Waktu reminder sudah lewat. Pilih tanggal dan waktu yang masih akan datang.');
+        }
+      } else {
+        if (scheduledMs <= nowMs) {
+          const daysOfWeek = updates.daysOfWeek || existing.daysOfWeek;
+          if (targetFrequency === 'daily') {
+            const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            scheduledAtISO = getUTCISOFromLocal(tomorrow.toISOString().split("T")[0], targetTime, userTimezone);
+          } else if (targetFrequency === 'weekdays') {
+            let next = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            while (next.getDay() === 0 || next.getDay() === 6) {
+              next = new Date(next.getTime() + 24 * 60 * 60 * 1000);
+            }
+            scheduledAtISO = getUTCISOFromLocal(next.toISOString().split("T")[0], targetTime, userTimezone);
+          } else if (targetFrequency === 'weekly' && daysOfWeek && daysOfWeek.length > 0) {
+            const targetDay = daysOfWeek[0];
+            let next = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            let attempts = 0;
+            while (next.getDay() !== targetDay && attempts < 7) {
+              next = new Date(next.getTime() + 24 * 60 * 60 * 1000);
+              attempts++;
+            }
+            scheduledAtISO = getUTCISOFromLocal(next.toISOString().split("T")[0], targetTime, userTimezone);
+          } else {
+            const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            scheduledAtISO = getUTCISOFromLocal(tomorrow.toISOString().split("T")[0], targetTime, userTimezone);
+          }
+        }
+      }
+
+      const occurrenceId = activeOcc ? activeOcc.id : crypto.randomUUID();
+
+      if (activeOcc && activeOcc.id) {
+        try {
+          await cancelNativeLocalAlarm(activeOcc.id);
+        } catch (_) {}
+      }
+
+      updatedOccurrence = {
+        id: occurrenceId,
+        reminderId: id,
+        user_id: existing.user_id || 'offline_user',
+        scheduledAt: scheduledAtISO,
+        status: 'scheduled',
+        snoozedUntil: undefined,
+        notificationTag: `reminder-${id}-occurrence-${occurrenceId}`,
+        createdAt: activeOcc?.createdAt || nowISO,
+        updatedAt: nowISO
+      };
+    }
+
+    // Only commit writes after validation succeeds!
     const updatedReminderObj: IDBReminder = {
       ...existing,
       ...updates,
@@ -179,7 +258,22 @@ export class ReminderRepository {
       status: 'PENDING'
     });
 
-    return updatedReminderObj;
+    if (updatedOccurrence) {
+      await updateOccurrenceInIDB(updatedOccurrence);
+
+      const sanitizedOccPayload = sanitizeOccurrenceForSupabase(updatedOccurrence);
+
+      await addToOfflineQueue({
+        entity_type: 'occurrence',
+        entity_id: updatedOccurrence.id,
+        operation: 'UPDATE',
+        payload: sanitizedOccPayload,
+        retry_count: 0,
+        status: 'PENDING'
+      });
+    }
+
+    return { reminder: updatedReminderObj, occurrence: updatedOccurrence };
   }
 
   async toggleActive(id: string, isActive: boolean): Promise<IDBReminder | null> {

@@ -203,11 +203,14 @@ export default function RemindersPage() {
     setBodyText(reminder.body || "");
     setTime(reminder.time || "08:00");
     if (reminder.currentOccurrence?.scheduledAt) {
-      const localIso = formatLocalFromUTC(reminder.currentOccurrence.scheduledAt, reminder.timezone);
-      const datePart = localIso.split(" ")[0];
-      if (datePart && datePart.includes("-")) {
-        setScheduledDate(datePart);
+      try {
+        const yyyymmdd = new Intl.DateTimeFormat('en-CA', { timeZone: reminder.timezone || 'Asia/Jakarta' }).format(new Date(reminder.currentOccurrence.scheduledAt));
+        setScheduledDate(yyyymmdd);
+      } catch (_) {
+        setScheduledDate(new Date().toISOString().split('T')[0]);
       }
+    } else {
+      setScheduledDate(new Date().toISOString().split('T')[0]);
     }
     setFrequency(reminder.frequency || "once");
     setSound(reminder.sound || "default");
@@ -299,7 +302,7 @@ export default function RemindersPage() {
     const scheduledAtISO = getUTCISOFromLocal(scheduledDate, time, timezone);
 
     if (editingId) {
-      await updateReminder(editingId, {
+      const success = await updateReminder(editingId, {
         title,
         body: bodyText,
         time,
@@ -309,8 +312,10 @@ export default function RemindersPage() {
         sound,
         daysOfWeek: frequency === 'weekly' ? [new Date(scheduledDate).getDay()] : undefined
       });
-      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pengingat Diperbarui & Diunggah', showConfirmButton: false, timer: 1500 });
-      resetForm();
+      if (success) {
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pengingat Diperbarui & Diunggah', showConfirmButton: false, timer: 1500 });
+        resetForm();
+      }
     } else {
       // addReminder returns boolean — only show success if it returned true
       const success = await addReminder({
