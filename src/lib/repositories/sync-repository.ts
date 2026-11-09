@@ -309,10 +309,18 @@ export class SyncRepository {
             }
 
             if (!parentExistsOnServer) {
+              const localParentExists = (await getRemindersFromIDB()).some(r => r.id === parentRemId);
+              if (!localParentExists && (item.retry_count || 0) >= 2) {
+                console.warn(`[SYNC ENGINE] Occurrence CREATE parent permanently missing (Reminder ID: ${parentRemId}). Purging orphaned occurrence ${item.entity_id}.`);
+                await removeFromOfflineQueue(rawItem.id);
+                continue;
+              }
+
               console.warn(`[SYNC ENGINE] Occurrence CREATE deferred — parent reminder not yet synced | Reminder ID: ${parentRemId} | Occurrence ID: ${item.entity_id}`);
               await updateQueueItemInIDB({
                 ...item,
                 id: rawItem.id,
+                retry_count: (item.retry_count || 0) + 1,
                 status: 'PENDING',
                 error_message: `Menunggu sinkronisasi pengingat induk (Reminder ID: ${parentRemId})`
               });
@@ -876,6 +884,11 @@ export class SyncRepository {
         if (remoteAgendas && Array.isArray(remoteAgendas)) {
           const localAgendas = await getAgendasFromIDB();
           const currentQueue = await getOfflineQueue();
+          const pendingMutationAgendaIds = new Set(
+            currentQueue
+              .filter(i => i.entity_type === 'agenda')
+              .map(i => i.entity_id)
+          );
           const pendingCreateAgendaIds = new Set(
             currentQueue
               .filter(i => i.entity_type === 'agenda' && i.operation === 'CREATE')
@@ -890,9 +903,13 @@ export class SyncRepository {
 
           const agendaMap = new Map<string, IDBAgenda>();
 
-          // Clean up local agendas that were deleted on remote
+          // Clean up local agendas ONLY if confirmed deleted on remote AND belongs to user
           for (const local of localAgendas) {
-            if (remoteAgendaIds.has(local.id) || pendingCreateAgendaIds.has(local.id)) {
+            const hasPendingMutation = pendingMutationAgendaIds.has(local.id);
+            const existsOnRemote = remoteAgendaIds.has(local.id);
+            const isOwnedByCurrentUser = !local.user_id || local.user_id === user.id;
+
+            if (existsOnRemote || hasPendingMutation || !isOwnedByCurrentUser) {
               agendaMap.set(local.id, local);
             } else {
               console.log(`[SYNC ENGINE] Remote deletion detected: removing local agenda ${local.id} ("${local.title}")`);

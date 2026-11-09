@@ -1,6 +1,10 @@
 // IndexedDB Helper v3 for Agendaku PWA, Native Capacitor & Service Worker
 // Stores: 'agendas', 'reminders', 'occurrences', 'offline_queue', 'app_state'
 
+import { isValidUUID, generateUUID } from "@/lib/utils";
+
+export { isValidUUID, generateUUID };
+
 const DB_NAME = 'agendaku_pwa_db';
 const DB_VERSION = 3;
 
@@ -502,6 +506,68 @@ export async function clearOfflineQueue(): Promise<void> {
   }
 }
 
+/**
+ * Permanently purge a single queue item from offline_queue by its ID.
+ */
+export async function purgeOfflineQueueItem(id: string): Promise<boolean> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction('offline_queue', 'readwrite');
+    const store = tx.objectStore('offline_queue');
+    store.delete(id);
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    console.log(`[IDB] Successfully purged queue item: ${id}`);
+    return true;
+  } catch (e) {
+    console.error(`[IDB] purgeOfflineQueueItem error for ${id}:`, e);
+    return false;
+  }
+}
+
+/**
+ * Purge all failed or unrecoverable mutations from offline_queue.
+ */
+export async function purgeAllFailedQueueItems(): Promise<number> {
+  let purgedCount = 0;
+  try {
+    const db = await openDB();
+    const tx = db.transaction('offline_queue', 'readwrite');
+    const store = tx.objectStore('offline_queue');
+    const req = store.getAll();
+
+    await new Promise<void>((resolve, reject) => {
+      req.onsuccess = () => {
+        const items = (req.result || []) as IDBOfflineQueueItem[];
+        for (const item of items) {
+          if (
+            item.status === 'FAILED_FATAL' ||
+            item.status === 'FAILED_RETRYABLE' ||
+            (item.retry_count && item.retry_count >= 5)
+          ) {
+            store.delete(item.id);
+            purgedCount++;
+          }
+        }
+        resolve();
+      };
+      req.onerror = () => reject(req.error);
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+    console.log(`[IDB] Purged ${purgedCount} failed queue items.`);
+  } catch (e) {
+    console.error('[IDB] purgeAllFailedQueueItems error:', e);
+  }
+  return purgedCount;
+}
+
 // ==========================================
 // ORPHAN DATA & QUEUE REPAIR API
 // ==========================================
@@ -517,6 +583,8 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
   let repairedOccurrences = 0;
   let repairedQueue = 0;
 
+  const canAssignUserId = isValidUUID(userId);
+
   try {
     const db = await openDB();
     const tx = db.transaction(['agendas', 'reminders', 'occurrences', 'offline_queue'], 'readwrite');
@@ -528,7 +596,7 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
       agendasReq.onsuccess = () => {
         const items = (agendasReq.result || []) as IDBAgenda[];
         for (const item of items) {
-          if (!item.user_id || item.user_id === 'undefined' || item.user_id === 'offline_user' || item.user_id !== userId) {
+          if (canAssignUserId && (!item.user_id || item.user_id === 'undefined' || item.user_id === 'offline_user')) {
             item.user_id = userId;
             agendaStore.put(item);
             repairedAgendas++;
@@ -541,11 +609,13 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
     // 2. Repair Reminders
     const reminderStore = tx.objectStore('reminders');
     const remindersReq = reminderStore.getAll();
+    const localReminderIds = new Set<string>();
     await new Promise<void>((res) => {
       remindersReq.onsuccess = () => {
         const items = (remindersReq.result || []) as IDBReminder[];
         for (const item of items) {
-          if (!item.user_id || item.user_id === 'undefined' || item.user_id === 'offline_user' || item.user_id !== userId) {
+          if (item.id) localReminderIds.add(item.id);
+          if (canAssignUserId && (!item.user_id || item.user_id === 'undefined' || item.user_id === 'offline_user')) {
             item.user_id = userId;
             reminderStore.put(item);
             repairedReminders++;
@@ -562,7 +632,7 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
       occReq.onsuccess = () => {
         const items = (occReq.result || []) as IDBOccurrence[];
         for (const item of items) {
-          if (!item.user_id || item.user_id === 'undefined' || item.user_id === 'offline_user' || item.user_id !== userId) {
+          if (canAssignUserId && (!item.user_id || item.user_id === 'undefined' || item.user_id === 'offline_user')) {
             item.user_id = userId;
             occStore.put(item);
             repairedOccurrences++;
@@ -586,7 +656,7 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
             continue;
           }
 
-          // Only purge permanently fatal queue items (unsupported/corrupted format)
+          // Purge permanently fatal queue items
           if (item.status === 'FAILED_FATAL') {
             console.warn(`[IDB REPAIR] Purging fatal failed queue item ${item.id}`);
             queueStore.delete(item.id);
@@ -594,32 +664,52 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
             continue;
           }
 
+          // Purge queue items that failed repeatedly (> 8 retries) with persistent server rejection
+          if ((item.retry_count || 0) >= 8 && item.status === 'FAILED_RETRYABLE') {
+            console.warn(`[IDB REPAIR] Purging perpetually failing queue item ${item.id}`);
+            queueStore.delete(item.id);
+            repairedQueue++;
+            continue;
+          }
+
+          // Check for orphan occurrence mutations whose parent reminder no longer exists
+          if (item.entity_type === 'occurrence') {
+            const parentRemId = item.payload?.reminder_id || item.payload?.reminderId;
+            if (parentRemId && !localReminderIds.has(parentRemId) && (item.retry_count || 0) > 0) {
+              console.warn(`[IDB REPAIR] Purging orphaned occurrence queue item ${item.id} (Parent ${parentRemId} missing)`);
+              queueStore.delete(item.id);
+              repairedQueue++;
+              continue;
+            }
+          }
+
           let updated = false;
 
-          // If item accumulated retry counts from server timeouts, reset it to give it another chance
-          if ((item.retry_count || 0) >= 5 || item.status === 'FAILED_RETRYABLE') {
+          // Reset retry count & error message for recoverable items so sync can retry cleanly
+          if ((item.retry_count || 0) > 0 || item.status === 'FAILED_RETRYABLE') {
             item.status = 'PENDING';
             item.retry_count = 0;
             item.error_message = undefined;
             updated = true;
           }
 
-          if (item.payload) {
-            if (!item.payload.user_id || item.payload.user_id === 'undefined' || item.payload.user_id === 'offline_user' || item.payload.user_id !== userId) {
+          if (item.payload && canAssignUserId) {
+            if (!item.payload.user_id || item.payload.user_id === 'undefined' || item.payload.user_id === 'offline_user') {
               item.payload.user_id = userId;
               updated = true;
             }
-            if (item.payload.reminder && (!item.payload.reminder.user_id || item.payload.reminder.user_id === 'undefined' || item.payload.reminder.user_id === 'offline_user' || item.payload.reminder.user_id !== userId)) {
+            if (item.payload.reminder && (!item.payload.reminder.user_id || item.payload.reminder.user_id === 'undefined' || item.payload.reminder.user_id === 'offline_user')) {
               item.payload.reminder.user_id = userId;
               updated = true;
             }
-            if (item.payload.occurrence) {
-              if ('user_id' in item.payload.occurrence) {
-                delete item.payload.occurrence.user_id;
-                updated = true;
-              }
+          }
+
+          if (item.payload) {
+            if (item.payload.occurrence && 'user_id' in item.payload.occurrence) {
+              delete item.payload.occurrence.user_id;
+              updated = true;
             }
-            if (item.entity_type === 'occurrence' && item.payload && 'user_id' in item.payload) {
+            if (item.entity_type === 'occurrence' && 'user_id' in item.payload) {
               delete item.payload.user_id;
               updated = true;
             }

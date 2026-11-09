@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, MapPin } from "lucide-react";
 import { useStore, Agenda } from "@/store/useStore";
 import { format } from "date-fns";
+import { generateUUID } from "@/lib/utils";
 
 import { AgendaTimeMode, getAgendaTimeMode } from "@/lib/agenda-time";
 
@@ -198,7 +199,7 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda, initi
         });
       } else if (isRecurringWeekly) {
         // Section 5 & 6: Recurring Weekly Agenda Generation over Active Semester Range
-        const groupId = crypto.randomUUID?.() || Date.now().toString();
+        const groupId = generateUUID();
         let curr = new Date(recurrenceStartDate + 'T00:00:00');
         const end = new Date(recurrenceEndDate + 'T23:59:59');
 
@@ -234,7 +235,7 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda, initi
           curr.setDate(curr.getDate() + 1);
         }
       } else if (isMultiDay) {
-        const groupId = crypto.randomUUID?.() || Date.now().toString();
+        const groupId = generateUUID();
         
         let curr = new Date(selectedDateStr + 'T00:00:00');
         curr.setHours(0,0,0,0);

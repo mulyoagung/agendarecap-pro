@@ -1,3 +1,5 @@
+import { isValidUUID } from "@/lib/utils";
+
 /**
  * Sanitizer & Normalizer for Supabase Database Persistence
  * Ensures no UI-only helper attributes (like `scheduledDate`, `currentOccurrence`, `displayTime`)
@@ -74,7 +76,9 @@ export function sanitizeAgendaForSupabase(input: any): SupabaseAgendaPayload {
   if (input.status !== undefined) sanitized.status = input.status;
   if (input.privateNotes !== undefined) sanitized.privateNotes = input.privateNotes;
   if (input.isShareable !== undefined) sanitized.isShareable = input.isShareable;
-  if (input.groupId !== undefined) sanitized.groupId = input.groupId;
+  if (input.groupId !== undefined) {
+    sanitized.groupId = (typeof input.groupId === 'string' && isValidUUID(input.groupId)) ? input.groupId : null as any;
+  }
   if (input.isOnline !== undefined) sanitized.isOnline = input.isOnline;
   if (input.onlineLink !== undefined) sanitized.onlineLink = input.onlineLink;
   if (input.meetingId !== undefined) sanitized.meetingId = input.meetingId;
@@ -128,8 +132,10 @@ export function sanitizeOccurrenceForSupabase(input: any): SupabaseOccurrencePay
 
   if (input.id !== undefined) sanitized.id = input.id;
 
-  if (input.reminder_id !== undefined) sanitized.reminder_id = input.reminder_id;
-  else if (input.reminderId !== undefined) sanitized.reminder_id = input.reminderId;
+  const rawRemId = input.reminder_id !== undefined ? input.reminder_id : input.reminderId;
+  if (rawRemId !== undefined) {
+    sanitized.reminder_id = (typeof rawRemId === 'string' && isValidUUID(rawRemId)) ? rawRemId : rawRemId;
+  }
 
   if (input.scheduled_at !== undefined) sanitized.scheduled_at = input.scheduled_at;
   else if (input.scheduledAt !== undefined) sanitized.scheduled_at = input.scheduledAt;

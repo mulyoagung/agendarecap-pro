@@ -7,6 +7,7 @@ import {
   IDBAgenda 
 } from "@/lib/idb";
 import { createClient } from "@/lib/supabase/client";
+import { generateUUID } from "@/lib/utils";
 
 export class AgendaRepository {
   async getLocal(): Promise<IDBAgenda[]> {
@@ -21,7 +22,7 @@ export class AgendaRepository {
 
   async create(input: Omit<IDBAgenda, "id" | "is_completed" | "updated_at"> & { id?: string }): Promise<IDBAgenda> {
     const now = new Date().toISOString();
-    const id = input.id || crypto.randomUUID();
+    const id = input.id || generateUUID();
 
     const supabase = createClient();
     const { data: { session } } = await supabase.auth.getSession();

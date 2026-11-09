@@ -105,7 +105,7 @@ export function buildConsultationWidgetPayload(agendas: WidgetAgendaLike[]): Con
   }
 
   return Array.from(consultationMap.values())
-    .slice(0, 10)
+    .slice(0, 100)
     .map(g => ({
       title: g.count > 1 ? `${g.title} (${g.count} Sesi)` : g.title,
       notes: g.notes,

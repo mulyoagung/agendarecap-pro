@@ -2,6 +2,7 @@ package com.agendarecap.app;
 
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.widget.RemoteViews;
 import android.widget.RemoteViewsService;
@@ -34,11 +35,13 @@ public class Agenda7DaysWidgetService extends RemoteViewsService {
         String dateLabel;
         String time;
         String title;
+        int dateColor;
 
-        AgendaItem(String dateLabel, String time, String title) {
+        AgendaItem(String dateLabel, String time, String title, int dateColor) {
             this.dateLabel = dateLabel;
             this.time = time;
             this.title = title;
+            this.dateColor = dateColor;
         }
     }
 
@@ -81,6 +84,7 @@ public class Agenda7DaysWidgetService extends RemoteViewsService {
 
             AgendaItem item = mItems.get(position);
             rv.setTextViewText(R.id.agenda7_item_date, item.dateLabel);
+            rv.setTextColor(R.id.agenda7_item_date, item.dateColor);
             rv.setTextViewText(R.id.agenda7_item_time, item.time);
             rv.setTextViewText(R.id.agenda7_item_title, item.title);
 
@@ -140,18 +144,67 @@ public class Agenda7DaysWidgetService extends RemoteViewsService {
                         String title = obj.optString("title", "Agenda");
 
                         String dateLabel;
+                        int dateColor;
+
                         if (todayKey.equals(itemDate)) {
                             dateLabel = "Hari\nini";
+                            dateColor = Color.parseColor("#4ADE80"); // Bright emerald green for Today
                         } else {
                             try {
                                 java.util.Date d = keyFmt.parse(itemDate);
-                                dateLabel = d != null ? labelFmt.format(d) : itemDate.substring(5);
+                                Calendar cal = Calendar.getInstance();
+                                if (d != null) {
+                                    cal.setTime(d);
+                                    int dayOfWeek = cal.get(Calendar.DAY_OF_WEEK);
+
+                                    String dayName;
+                                    String colorHex;
+
+                                    switch (dayOfWeek) {
+                                        case Calendar.MONDAY:
+                                            dayName = "Senin";
+                                            colorHex = "#38BDF8"; // Sky Blue
+                                            break;
+                                        case Calendar.TUESDAY:
+                                            dayName = "Selasa";
+                                            colorHex = "#F472B6"; // Pink / Rose
+                                            break;
+                                        case Calendar.WEDNESDAY:
+                                            dayName = "Rabu";
+                                            colorHex = "#FBBF24"; // Amber Yellow
+                                            break;
+                                        case Calendar.THURSDAY:
+                                            dayName = "Kamis";
+                                            colorHex = "#A78BFA"; // Lavender / Purple
+                                            break;
+                                        case Calendar.FRIDAY:
+                                            dayName = "Jumat";
+                                            colorHex = "#2DD4BF"; // Teal / Turquoise
+                                            break;
+                                        case Calendar.SATURDAY:
+                                            dayName = "Sabtu";
+                                            colorHex = "#FB923C"; // Warm Orange
+                                            break;
+                                        case Calendar.SUNDAY:
+                                        default:
+                                            dayName = "Minggu";
+                                            colorHex = "#F87171"; // Coral Red
+                                            break;
+                                    }
+
+                                    dateLabel = dayName + "\n" + labelFmt.format(d);
+                                    dateColor = Color.parseColor(colorHex);
+                                } else {
+                                    dateLabel = itemDate.substring(5);
+                                    dateColor = Color.parseColor("#94A3B8");
+                                }
                             } catch (Exception ex) {
                                 dateLabel = itemDate.length() >= 10 ? itemDate.substring(5) : itemDate;
+                                dateColor = Color.parseColor("#94A3B8");
                             }
                         }
 
-                        mItems.add(new AgendaItem(dateLabel, time, title));
+                        mItems.add(new AgendaItem(dateLabel, time, title, dateColor));
                     }
                 }
             } catch (Exception e) {

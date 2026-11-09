@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 import Swal from "sweetalert2";
+import { generateUUID, isValidUUID } from "@/lib/utils";
 
 function useDebounceCallback<Args extends any[]>(callback: (...args: Args) => void, delay: number) {
   const timeoutRef = React.useRef<NodeJS.Timeout | undefined>(undefined);
@@ -132,8 +133,9 @@ export default function ConsultationPage() {
     const primary = group.agendas[0];
     const newDate = primary?.scheduled_at ? new Date(primary.scheduled_at) : new Date();
 
-    if (primary && !primary.groupId) {
-      await updateAgenda(primary.id, { groupId: group.groupId });
+    const targetGroupId = isValidUUID(group.groupId) ? group.groupId : generateUUID();
+    if (primary && (!primary.groupId || !isValidUUID(primary.groupId))) {
+      await updateAgenda(primary.id, { groupId: targetGroupId });
     }
 
     const success = await addAgenda({
@@ -145,7 +147,7 @@ export default function ConsultationPage() {
       scheduled_at: newDate.toISOString(),
       status: 'pending_consultation',
       isShareable: false,
-      groupId: group.groupId
+      groupId: targetGroupId
     });
 
     if (success) {
@@ -190,7 +192,7 @@ export default function ConsultationPage() {
   const handleAddConsultation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newConsultation) return;
-    const groupId = crypto.randomUUID?.() || Date.now().toString();
+    const groupId = generateUUID();
     const success = await addAgenda({
       title: newConsultation,
       location: '-',

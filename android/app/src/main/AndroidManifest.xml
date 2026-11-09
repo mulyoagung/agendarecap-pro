@@ -111,6 +111,12 @@
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 
+        <!-- RemoteViews Service for scrollable Consultation Widget -->
+        <service
+            android:name=".ConsultationWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
         <!-- Firebase Cloud Messaging Service -->
         <service
             android:name=".FCMService"

@@ -12,6 +12,7 @@ import { getUTCISOFromLocal, getTodayLocalYYYYMMDD } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { sanitizeReminderForSupabase, sanitizeOccurrenceForSupabase } from "@/lib/repositories/sanitizer";
 import { isNativePlatform, scheduleNativeLocalAlarm, cancelNativeLocalAlarm, getScheduledNativeAlarms } from "@/lib/native-alarm";
+import { generateUUID } from "@/lib/utils";
 
 export class ReminderRepository {
   async getLocalReminders(): Promise<IDBReminder[]> {
@@ -34,8 +35,8 @@ export class ReminderRepository {
     sound?: string;
     daysOfWeek?: number[];
   }): Promise<{ reminder: IDBReminder; occurrence: IDBOccurrence }> {
-    const reminderId = input.id || crypto.randomUUID();
-    const occurrenceId = crypto.randomUUID();
+    const reminderId = input.id || generateUUID();
+    const occurrenceId = generateUUID();
     const now = new Date();
     const userTimezone = input.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Jakarta";
 
@@ -230,7 +231,7 @@ export class ReminderRepository {
         }
       }
 
-      const occurrenceId = activeOcc ? activeOcc.id : crypto.randomUUID();
+      const occurrenceId = activeOcc ? activeOcc.id : generateUUID();
 
       if (activeOcc && activeOcc.id) {
         try {

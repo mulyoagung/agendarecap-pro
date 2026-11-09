@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/consultation_item_container"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- Accent bullet point -->
+        <TextView
+            android:layout_width="7dp"
+            android:layout_height="7dp"
+            android:background="#F97316"
+            android:textSize="0sp" />
+
+        <TextView
+            android:id="@+id/consultation_item_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="Topik Konsultasi"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:maxLines="2"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <!-- Notes sub-row (hidden if empty) -->
+    <TextView
+        android:id="@+id/consultation_item_notes"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="13dp"
+        android:layout_marginTop="1dp"
+        android:text=""
+        android:textColor="#A1A1AA"
+        android:textSize="10sp"
+        android:maxLines="2"
+        android:ellipsize="end" />
+
+</LinearLayout>
+

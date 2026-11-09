@@ -6,15 +6,15 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.view.View;
 import android.widget.RemoteViews;
 import org.json.JSONArray;
-import org.json.JSONObject;
 
 /**
  * ConsultationWidgetProvider
- * Displays the list of active consultation items on the Android home screen.
- * Each item shows agenda title + consultation notes (if available).
+ * Displays a scrollable list of active consultation items on the Android home screen
+ * using a ListView backed by ConsultationWidgetService (RemoteViewsService).
  * Provides a "+ Catatan" button to open the consultation page for adding notes.
  * Data is fed by NativeAlarmPlugin.updateConsultationWidgetData().
  */
@@ -56,7 +56,7 @@ public class ConsultationWidgetProvider extends AppWidgetProvider {
         String appName = NativeAlarmPlugin.getSavedAppName(context);
         views.setTextViewText(R.id.consultation_widget_title, appName.toUpperCase());
 
-        // Tap on widget body → open consultation page
+        // Tap on widget body / header → open consultation page
         Intent consultIntent = new Intent(context, MainActivity.class);
         consultIntent.putExtra("target_route", "consultation");
         PendingIntent consultPendingIntent = PendingIntent.getActivity(
@@ -79,60 +79,39 @@ public class ConsultationWidgetProvider extends AppWidgetProvider {
         );
         views.setOnClickPendingIntent(R.id.consultation_btn_add_note, addNotePendingIntent);
 
-        // Item container/title/notes IDs
-        int[] containerIds = {
-            R.id.consultation_item1_container,
-            R.id.consultation_item2_container,
-            R.id.consultation_item3_container
-        };
-        int[] titleIds = {
-            R.id.consultation_item1_title,
-            R.id.consultation_item2_title,
-            R.id.consultation_item3_title
-        };
-        int[] notesIds = {
-            R.id.consultation_item1_notes,
-            R.id.consultation_item2_notes,
-            R.id.consultation_item3_notes
-        };
-
-        // Hide all item slots initially
-        for (int cid : containerIds) {
-            views.setViewVisibility(cid, View.GONE);
-        }
-        views.setViewVisibility(R.id.consultation_empty_text, View.GONE);
-
+        int count = 0;
         try {
             String jsonStr = getConsultationData(context);
             JSONArray array = new JSONArray(jsonStr);
-            int count = array.length();
+            count = array.length();
+        } catch (Exception ignored) {}
 
-            views.setTextViewText(R.id.consultation_count_badge, String.valueOf(count));
+        views.setTextViewText(R.id.consultation_count_badge, String.valueOf(count));
 
-            if (count == 0) {
-                views.setViewVisibility(R.id.consultation_empty_text, View.VISIBLE);
-            } else {
-                int displayCount = Math.min(count, 3);
-                for (int i = 0; i < displayCount; i++) {
-                    JSONObject item = array.getJSONObject(i);
-                    String title = item.optString("title", "Konsultasi");
-                    String notes = item.optString("notes", "").trim();
+        if (count > 0) {
+            // Set up RemoteAdapter for scrollable ListView
+            Intent serviceIntent = new Intent(context, ConsultationWidgetService.class);
+            serviceIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
+            serviceIntent.setData(Uri.fromParts("content", String.valueOf(appWidgetId), null));
+            views.setRemoteAdapter(R.id.consultation_list_view, serviceIntent);
 
-                    views.setTextViewText(titleIds[i], title);
-                    views.setViewVisibility(containerIds[i], View.VISIBLE);
+            // Pending intent template for item clicks → open consultation in main app
+            Intent itemClickIntent = new Intent(context, MainActivity.class);
+            PendingIntent itemPendingIntent = PendingIntent.getActivity(
+                    context,
+                    appWidgetId + 200,
+                    itemClickIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+            views.setPendingIntentTemplate(R.id.consultation_list_view, itemPendingIntent);
 
-                    // Show notes sub-row only if notes is non-empty
-                    if (!notes.isEmpty()) {
-                        views.setTextViewText(notesIds[i], notes);
-                        views.setViewVisibility(notesIds[i], View.VISIBLE);
-                    } else {
-                        views.setViewVisibility(notesIds[i], View.GONE);
-                    }
-                }
-            }
+            views.setViewVisibility(R.id.consultation_list_view, View.VISIBLE);
+            views.setViewVisibility(R.id.consultation_empty_text, View.GONE);
 
-        } catch (Exception e) {
-            views.setTextViewText(R.id.consultation_count_badge, "0");
+            // Refresh list view data
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.consultation_list_view);
+        } else {
+            views.setViewVisibility(R.id.consultation_list_view, View.GONE);
             views.setViewVisibility(R.id.consultation_empty_text, View.VISIBLE);
         }
 

@@ -39,6 +39,20 @@ class MainActivity : BridgeActivity() {
 
         // Handle widget tap intent extras on cold start
         handleWidgetIntent(intent)
+
+        // Ensure home screen widgets are updated with current state
+        try {
+            ConsultationWidgetProvider.updateAllWidgets(this)
+            Agenda7DaysWidgetProvider.updateAllWidgets(this)
+        } catch (ignored: Exception) {}
+    }
+
+    override fun onResume() {
+        super.onResume()
+        try {
+            ConsultationWidgetProvider.updateAllWidgets(this)
+            Agenda7DaysWidgetProvider.updateAllWidgets(this)
+        } catch (ignored: Exception) {}
     }
 
     override fun onNewIntent(intent: Intent) {

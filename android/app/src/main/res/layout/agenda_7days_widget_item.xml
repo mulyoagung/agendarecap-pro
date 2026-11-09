@@ -9,15 +9,18 @@
     android:paddingStart="2dp"
     android:paddingEnd="2dp">
 
-    <!-- Date label (e.g. Hari ini / 30/10) -->
+    <!-- Date label (e.g. Hari ini / Senin\n30/10) -->
     <TextView
         android:id="@+id/agenda7_item_date"
-        android:layout_width="40dp"
+        android:layout_width="48dp"
         android:layout_height="wrap_content"
-        android:text="30/10"
-        android:textColor="#94A3B8"
-        android:textSize="11sp"
-        android:lineSpacingMultiplier="1.1" />
+        android:gravity="center"
+        android:text="Senin\n30/10"
+        android:textColor="#38BDF8"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:lineSpacingMultiplier="0.95"
+        android:layout_marginEnd="6dp" />
 
     <!-- Time -->
     <TextView

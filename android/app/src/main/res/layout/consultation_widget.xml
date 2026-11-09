@@ -76,151 +76,15 @@
             android:paddingBottom="4dp" />
     </LinearLayout>
 
-    <!-- Item 1 -->
-    <LinearLayout
-        android:id="@+id/consultation_item1_container"
+    <!-- Scrollable ListView for Consultation Items -->
+    <ListView
+        android:id="@+id/consultation_list_view"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingTop="3dp"
-        android:paddingBottom="3dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:layout_width="8dp"
-                android:layout_height="8dp"
-                android:background="#F97316"
-                android:textSize="0sp" />
-
-            <TextView
-                android:id="@+id/consultation_item1_title"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="6dp"
-                android:text="Konsultasi 1"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:maxLines="1"
-                android:ellipsize="end" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/consultation_item1_notes"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="14dp"
-            android:text=""
-            android:textColor="#A1A1AA"
-            android:textSize="10sp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone" />
-    </LinearLayout>
-
-    <!-- Item 2 -->
-    <LinearLayout
-        android:id="@+id/consultation_item2_container"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingTop="3dp"
-        android:paddingBottom="3dp"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:layout_width="8dp"
-                android:layout_height="8dp"
-                android:background="#F97316"
-                android:textSize="0sp" />
-
-            <TextView
-                android:id="@+id/consultation_item2_title"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="6dp"
-                android:text="Konsultasi 2"
-                android:textColor="#E4E4E7"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:maxLines="1"
-                android:ellipsize="end" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/consultation_item2_notes"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="14dp"
-            android:text=""
-            android:textColor="#A1A1AA"
-            android:textSize="10sp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone" />
-    </LinearLayout>
-
-    <!-- Item 3 -->
-    <LinearLayout
-        android:id="@+id/consultation_item3_container"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingTop="3dp"
-        android:paddingBottom="3dp"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:layout_width="8dp"
-                android:layout_height="8dp"
-                android:background="#F97316"
-                android:textSize="0sp" />
-
-            <TextView
-                android:id="@+id/consultation_item3_title"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="6dp"
-                android:text="Konsultasi 3"
-                android:textColor="#E4E4E7"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:maxLines="1"
-                android:ellipsize="end" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/consultation_item3_notes"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="14dp"
-            android:text=""
-            android:textColor="#A1A1AA"
-            android:textSize="10sp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone" />
-    </LinearLayout>
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@null"
+        android:dividerHeight="2dp"
+        android:overScrollMode="never" />
 
     <!-- Empty state -->
     <TextView
@@ -231,6 +95,6 @@
         android:textColor="#71717A"
         android:textSize="11sp"
         android:visibility="gone"
-        android:paddingTop="4dp" />
+        android:paddingTop="8dp" />
 
 </LinearLayout>

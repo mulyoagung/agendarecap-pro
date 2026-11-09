@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { X, RefreshCw, AlertTriangle, CheckCircle2, Database, Copy, Wrench, Clock, ShieldAlert, Layers, Smartphone, Globe, Radio } from "lucide-react";
+import { X, RefreshCw, AlertTriangle, CheckCircle2, Database, Copy, Wrench, Clock, ShieldAlert, Layers, Smartphone, Globe, Radio, Trash2 } from "lucide-react";
 import Swal from "sweetalert2";
-import { getOfflineQueue, repairOrphanDataAndQueueInIDB, IDBOfflineQueueItem } from "@/lib/idb";
+import { getOfflineQueue, repairOrphanDataAndQueueInIDB, removeFromOfflineQueue, purgeAllFailedQueueItems, IDBOfflineQueueItem } from "@/lib/idb";
 import { runSyncEngine } from "@/lib/sync-engine";
 import { isNativePlatform, checkNativeAlarmPermissions, getScheduledNativeAlarms } from "@/lib/native-alarm";
 
@@ -55,7 +55,12 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
     } catch (e) {}
   }, []);
 
-  const markAsResolved = (id: string) => {
+  const markAsResolved = async (id: string) => {
+    // Also remove from offline queue if present
+    try {
+      await removeFromOfflineQueue(id);
+    } catch (_) {}
+
     setResolvedIds(prev => {
       const next = new Set(prev);
       next.add(id);
@@ -64,6 +69,8 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
       } catch (e) {}
       return next;
     });
+
+    if (onQueueUpdated) onQueueUpdated();
   };
 
   const clearAllResolved = () => {
@@ -294,10 +301,65 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
     }
   };
 
+  const handleDeleteQueueItem = async (id: string) => {
+    const confirm = await Swal.fire({
+      title: 'Hapus Item Antrean?',
+      text: 'Item ini akan dihapus permanen dari antrean lokal dan tidak akan dicoba lagi.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Ya, Hapus!',
+      cancelButtonText: 'Batal'
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    await removeFromOfflineQueue(id);
+    await markAsResolved(id);
+    await loadDiagnosticsData();
+    if (onQueueUpdated) onQueueUpdated();
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'success',
+      title: 'Item antrean berhasil dihapus',
+      showConfirmButton: false,
+      timer: 1500
+    });
+  };
+
+  const handlePurgeAllFailed = async () => {
+    const confirm = await Swal.fire({
+      title: 'Bersihkan Semua Antrean Gagal?',
+      text: 'Semua item antrean yang berstatus gagal / tertahan akan dibersihkan dari antrean lokal.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'Ya, Bersihkan Semua',
+      cancelButtonText: 'Batal'
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    const count = await purgeAllFailedQueueItems();
+    await loadDiagnosticsData();
+    if (onQueueUpdated) onQueueUpdated();
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'success',
+      title: `Berhasil membersihkan ${count} antrean gagal`,
+      showConfirmButton: false,
+      timer: 2000
+    });
+  };
+
   const handleRepairDatabase = async () => {
     const confirm = await Swal.fire({
       title: 'Perbaiki Antrean & Database?',
-      text: 'Ini akan mereset status retry antrean yang tertunda dan membersihkan payload ilegal.',
+      text: 'Ini akan mereset status retry antrean yang tertunda, membersihkan antrean orphan/rusak, dan menyelaraskan data lokal.',
       icon: 'question',
       showCancelButton: true,
       confirmButtonText: 'Ya, Perbaiki',
@@ -310,9 +372,10 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
     try {
       const { createClient } = await import("@/lib/supabase/client");
       const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id || '';
 
-      const result = await repairOrphanDataAndQueueInIDB(user?.id || 'offline_user');
+      const result = await repairOrphanDataAndQueueInIDB(userId);
       Swal.fire({
         icon: 'success',
         title: 'Perbaikan Selesai',
@@ -566,6 +629,13 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => handleDeleteQueueItem(item.id)}
+                      className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-lg text-xs font-semibold text-red-300 hover:text-red-200 transition-colors"
+                      title="Hapus / Buang dari antrean"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                     {!resolvedIds.has(item.id) && (
                       <button
                         onClick={() => markAsResolved(item.id)}
@@ -620,6 +690,17 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
               <Wrench className="w-4 h-4 text-amber-400" />
               <span>{isRepairing ? 'Memperbaiki...' : 'Perbaiki Database'}</span>
             </button>
+
+            {failedCount > 0 && (
+              <button
+                onClick={handlePurgeAllFailed}
+                className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 rounded-xl text-xs font-bold transition-all active:scale-95"
+                title="Bersihkan semua antrean yang gagal"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Bersihkan Gagal ({failedCount})</span>
+              </button>
+            )}
           </div>
 
           <button
